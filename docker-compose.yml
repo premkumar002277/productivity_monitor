@@ -1,0 +1,45 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: workwatch
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    restart: always
+    env_file: .env
+    ports:
+      - "4000:4000"
+    depends_on:
+      - mysql
+      - redis
+
+  client:
+    build:
+      context: .
+      dockerfile: apps/client/Dockerfile
+    restart: always
+    env_file: .env
+    ports:
+      - "5173:80"
+    depends_on:
+      - server
+
+volumes:
+  mysql_data:

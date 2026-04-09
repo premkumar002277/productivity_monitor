@@ -1,0 +1,22 @@
+{
+  "name": "workwatch",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace @workwatch/server",
+    "dev:client": "npm run dev --workspace @workwatch/client",
+    "build": "npm run build --workspace @workwatch/server && npm run build --workspace @workwatch/client",
+    "test": "npm run test --workspace @workwatch/server",
+    "prisma:generate": "npm run prisma:generate --workspace @workwatch/server",
+    "prisma:migrate": "npm run prisma:migrate --workspace @workwatch/server"
+  },
+  "devDependencies": {
+    "prisma": "^7.7.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^7.7.0"
+  }
+}

@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(uuid()) @db.Char(36)
+  name         String      @db.VarChar(100)
+  email        String      @unique @db.VarChar(150)
+  passwordHash String      @db.VarChar(255)
+  role         Role        @default(EMPLOYEE)
+  department   String?     @db.VarChar(100)
+  createdAt    DateTime    @default(now())
+  sessions     Session[]
+  alerts       Alert[]
+  dailyStats   DailyStat[]
+
+  @@index([role, department])
+}
+
+model Session {
+  id            String   @id @default(uuid()) @db.Char(36)
+  userId        String   @db.Char(36)
+  startedAt     DateTime @default(now())
+  endedAt       DateTime?
+  finalScore    Int?
+  faceSeconds   Int      @default(0)
+  idleSeconds   Int      @default(0)
+  activeSeconds Int      @default(0)
+  user          User     @relation(fields: [userId], references: [id])
+  events        Event[]
+
+  @@index([userId, startedAt])
+}
+
+model Event {
+  id        BigInt    @id @default(autoincrement())
+  sessionId String    @db.Char(36)
+  type      EventType
+  timestamp DateTime  @default(now())
+  value     Json?
+  session   Session   @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId, timestamp])
+}
+
+model DailyStat {
+  id           String   @id @default(uuid()) @db.Char(36)
+  userId       String   @db.Char(36)
+  date         DateTime @db.Date
+  avgScore     Decimal  @db.Decimal(5, 2)
+  totalFaceS   Int      @default(0)
+  totalIdleS   Int      @default(0)
+  sessionCount Int      @default(0)
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+model Alert {
+  id          String   @id @default(uuid()) @db.Char(36)
+  userId      String   @db.Char(36)
+  triggeredAt DateTime @default(now())
+  reason      String   @db.VarChar(255)
+  resolved    Boolean  @default(false)
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, triggeredAt])
+  @@index([resolved, triggeredAt])
+}
+
+enum Role {
+  ADMIN
+  EMPLOYEE
+}
+
+enum EventType {
+  FACE_DETECTED
+  FACE_LOST
+  TAB_BLUR
+  TAB_FOCUS
+  IDLE_START
+  IDLE_END
+}
