@@ -14,7 +14,7 @@ const eventLimiter = rateLimit({
   limit: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id ?? req.ip,
+  keyGenerator: (req) => req.user?.id ?? req.ip ?? "anonymous",
   message: { message: "Too many event batches. Slow down and retry in a minute." },
 });
 
@@ -37,7 +37,14 @@ router.post(
   eventLimiter,
   asyncHandler(async (req, res) => {
     const payload = eventBatchSchema.parse(req.body);
-    const result = await persistEventBatch(req.user!, payload.sessionId, payload.events);
+    const result = await persistEventBatch(
+      req.user!,
+      payload.sessionId,
+      payload.events.map((event) => ({
+        ...event,
+        value: event.value,
+      })),
+    );
     res.json(result);
   }),
 );

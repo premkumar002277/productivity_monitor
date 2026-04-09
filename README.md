@@ -7,9 +7,10 @@ The project in this repository is scaffolded from the provided MySQL blueprint a
 - JWT auth with refresh rotation
 - Employee session start/stop flow
 - Event batching for face/tab/idle signals
-- Server-side productivity scoring
+- Emotion detection, head pose estimation, and mouse/keyboard behavior sampling
+- Server-side productivity scoring with emotion and behavior weighting
 - Live admin updates over Socket.io
-- Daily rollup and retention job scaffolding
+- Daily rollup, emotion rollup, and retention cleanup jobs
 - Docker Compose for MySQL, Redis, client, and server
 
 ## Quick start
@@ -31,5 +32,7 @@ The project in this repository is scaffolded from the provided MySQL blueprint a
 
 ## Notes
 
-- The browser app uses `face-api.js` and expects Tiny Face Detector model files under `apps/client/public/models`.
+- The browser app uses `face-api.js` and expects Tiny Face Detector, Face Landmark 68, and Face Expression model files under `apps/client/public/models`.
+- Keyboard monitoring records timing metadata only. It does not store actual key values.
+- The default raw event/emotion retention window is `30` days via `RETENTION_DAYS`.
 - The current implementation is structured for a college/demo build and should be hardened further before any real deployment because monitoring software has legal and privacy implications.

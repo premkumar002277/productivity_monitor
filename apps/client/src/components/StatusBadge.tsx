@@ -7,7 +7,8 @@ type StatusBadgeProps = {
 const labels: Record<ProductivityStatus, string> = {
   active: "High",
   idle: "Moderate",
-  away: "Low",
+  low: "Low",
+  away: "Alert",
 };
 
 export function StatusBadge({ status }: StatusBadgeProps) {

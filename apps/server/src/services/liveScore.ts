@@ -3,7 +3,7 @@ import { ensureRedisConnection, redis } from "../lib/redis";
 
 export type LiveScorePayload = Pick<
   SessionMetrics,
-  "score" | "status" | "faceSeconds" | "idleSeconds" | "activeSeconds" | "totalSeconds"
+  "score" | "status" | "faceSeconds" | "idleSeconds" | "activeSeconds" | "totalSeconds" | "emotion" | "behavior"
 > & {
   userId: string;
   sessionId: string;

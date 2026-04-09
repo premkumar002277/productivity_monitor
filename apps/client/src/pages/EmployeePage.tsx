@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { BehaviorIndicator } from "../components/BehaviorIndicator";
+import { EmotionBadge } from "../components/EmotionBadge";
+import { EmotionMeters } from "../components/EmotionMeters";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../hooks/useAuth";
 import { useEmployeeMonitor } from "../hooks/useEmployeeMonitor";
@@ -57,15 +60,49 @@ export function EmployeePage() {
     }
 
     const score = session.finalScore ?? 0;
+    const totalSeconds = Math.max(1, session.faceSeconds + session.activeSeconds + session.idleSeconds);
 
     return {
-      totalSeconds: session.faceSeconds + session.activeSeconds + session.idleSeconds,
+      totalSeconds,
       faceSeconds: session.faceSeconds,
       idleSeconds: session.idleSeconds,
       activeSeconds: session.activeSeconds,
-      nonIdleSeconds: Math.max(0, session.activeSeconds + session.faceSeconds),
+      nonIdleSeconds: Math.max(0, totalSeconds - session.idleSeconds),
       score,
-      status: score >= 70 ? "active" : score >= 45 ? "idle" : "away",
+      status: score >= 75 ? "active" : score >= 50 ? "idle" : score >= 25 ? "low" : "away",
+      emotion: {
+        dominant: null,
+        scores: {
+          neutral: 0,
+          happy: 0,
+          sad: 0,
+          angry: 0,
+          fearful: 0,
+          disgusted: 0,
+          surprised: 0,
+        },
+        stressScore: 0,
+        engagementScore: 0,
+        boredomScore: 0,
+        updatedAt: null,
+      },
+      behavior: {
+        yaw: 0,
+        pitch: 0,
+        roll: 0,
+        lookingAway: false,
+        lookingAwaySeconds: 0,
+        headAwayRatio: 0,
+        avgVelocityPx: 0,
+        clicksPerMin: 0,
+        erraticScore: 0,
+        idleSeconds: 0,
+        kpm: 0,
+        rhythmScore: 0,
+        backspaceRate: 0,
+        burstDetected: false,
+        updatedAt: null,
+      },
     };
   }, [monitor.serverMetrics, sessionDetailsQuery.data?.session]);
 
@@ -151,8 +188,8 @@ export function EmployeePage() {
           </div>
 
           <p className="panel__copy">
-            Video never leaves the browser in this build. The app only sends lightweight events such as face found/lost,
-            tab blur/focus, and idle state changes.
+            This build captures facial presence, facial expression probabilities, head direction, mouse behavior, and keyboard timing
+            metadata. It does not store video frames or the actual keys you type.
           </p>
 
           <label className="checkbox-row">
@@ -161,7 +198,7 @@ export function EmployeePage() {
               checked={consentAccepted}
               onChange={(event) => setConsentAccepted(event.target.checked)}
             />
-            <span>I consent to monitoring while this session is active.</span>
+            <span>I consent to emotion and behavior-aware monitoring while this session is active.</span>
           </label>
 
           <div className="button-row">
@@ -190,21 +227,31 @@ export function EmployeePage() {
             <video ref={monitor.videoRef} autoPlay muted playsInline />
           </div>
 
-          <div className="signal-grid">
+          <div className="signal-grid signal-grid--wide">
             <article className="signal-card">
               <strong>Face</strong>
               <p>{monitor.signalState.faceDetected ? "Detected" : "Not detected"}</p>
               <span>{monitor.signalState.confidence ? `${Math.round(monitor.signalState.confidence * 100)}% confidence` : "No face score yet"}</span>
             </article>
             <article className="signal-card">
-              <strong>Tab focus</strong>
-              <p>{monitor.signalState.tabFocused ? "Focused" : "Blurred"}</p>
-              <span>Visibility API signal</span>
+              <strong>Emotion</strong>
+              <p>{monitor.emotionState.dominant ?? "No signal"}</p>
+              <span>Stress {monitor.emotionState.stressScore}%</span>
             </article>
             <article className="signal-card">
-              <strong>Idle state</strong>
-              <p>{monitor.signalState.idle ? "Idle" : "Active"}</p>
-              <span>2-minute inactivity threshold</span>
+              <strong>Head pose</strong>
+              <p>{monitor.headPoseState.lookingAway ? "Looking away" : "Facing screen"}</p>
+              <span>Yaw {monitor.headPoseState.yaw.toFixed(2)}</span>
+            </article>
+            <article className="signal-card">
+              <strong>Mouse</strong>
+              <p>{monitor.mouseState.avgVelocityPx}px avg velocity</p>
+              <span>Erratic {monitor.mouseState.erraticScore.toFixed(2)}</span>
+            </article>
+            <article className="signal-card">
+              <strong>Keyboard</strong>
+              <p>{monitor.keyboardState.kpm} KPM</p>
+              <span>Rhythm {Math.round(monitor.keyboardState.rhythmScore * 100)}%</span>
             </article>
             <article className="signal-card">
               <strong>Sync</strong>
@@ -217,12 +264,34 @@ export function EmployeePage() {
         <section className="panel">
           <div className="panel__header">
             <div>
+              <span className="eyebrow">Current State</span>
+              <h2>Emotion and behavior snapshot</h2>
+            </div>
+          </div>
+
+          <div className="detail-summary-panel">
+            <EmotionBadge emotion={latestMetrics?.emotion ?? monitor.emotionState} />
+            <EmotionMeters emotion={latestMetrics?.emotion ?? monitor.emotionState} />
+            <BehaviorIndicator behavior={latestMetrics?.behavior ?? monitor.serverMetrics?.behavior ?? {
+              ...monitor.mouseState,
+              ...monitor.keyboardState,
+              ...monitor.headPoseState,
+              lookingAwaySeconds: 0,
+              headAwayRatio: 0,
+              updatedAt: monitor.headPoseState.updatedAt,
+            }} />
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel__header">
+            <div>
               <span className="eyebrow">Server Score</span>
               <h2>Current session snapshot</h2>
             </div>
           </div>
 
-          <div className="metric-grid">
+          <div className="metric-grid metric-grid--triple">
             <article className="metric-card">
               <span>Score</span>
               <strong>{latestMetrics?.score ?? 0}</strong>
@@ -236,8 +305,16 @@ export function EmployeePage() {
               <strong>{formatDuration(latestMetrics?.activeSeconds ?? 0)}</strong>
             </article>
             <article className="metric-card">
-              <span>Idle time</span>
-              <strong>{formatDuration(latestMetrics?.idleSeconds ?? 0)}</strong>
+              <span>Stress</span>
+              <strong>{latestMetrics?.emotion.stressScore ?? 0}%</strong>
+            </article>
+            <article className="metric-card">
+              <span>Engagement</span>
+              <strong>{latestMetrics?.emotion.engagementScore ?? 0}%</strong>
+            </article>
+            <article className="metric-card">
+              <span>Typing rhythm</span>
+              <strong>{Math.round((latestMetrics?.behavior.rhythmScore ?? 0) * 100)}%</strong>
             </article>
           </div>
         </section>
@@ -255,7 +332,7 @@ export function EmployeePage() {
             {sessionDetailsQuery.data?.session.events.slice(-10).reverse().map((event) => (
               <article className="timeline-item" key={event.id}>
                 <div>
-                  <strong>{event.type.replaceAll("_", " ")}</strong>
+                  <strong>{event.type.replace(/_/g, " ")}</strong>
                   <p>{new Date(event.timestamp).toLocaleString()}</p>
                 </div>
                 {event.value ? <pre>{JSON.stringify(event.value, null, 2)}</pre> : <span className="timeline-item__quiet">No payload</span>}

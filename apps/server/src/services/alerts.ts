@@ -4,15 +4,236 @@ import { ensureRedisConnection, redis } from "../lib/redis";
 import { emitToAdmins } from "../lib/socket";
 import type { SessionMetrics } from "./scorer";
 
+export type AlertType = "low_score" | "high_stress" | "head_away" | "erratic_behavior" | "low_engagement";
+
 type AlertSettings = {
   scoreThreshold: number;
   durationMinutes: number;
 };
 
-const ALERT_SETTINGS_KEY = "settings:alerts";
+type AlertContext = {
+  userId: string;
+  name: string;
+  department: string | null;
+  sessionId: string;
+  metrics: SessionMetrics;
+};
 
-function alertBreachKey(userId: string) {
-  return `alert-breach:${userId}`;
+type RuleEvaluation = {
+  alertType: AlertType;
+  reason: string;
+  breachActive: boolean;
+  breachAfterSeconds: number;
+  recoveryActive?: boolean;
+  recoveryAfterSeconds?: number;
+};
+
+const ALERT_SETTINGS_KEY = "settings:alerts";
+const ALERT_TYPES: AlertType[] = ["low_score", "high_stress", "head_away", "erratic_behavior", "low_engagement"];
+
+function alertBreachKey(userId: string, alertType: AlertType) {
+  return `alert-breach:${alertType}:${userId}`;
+}
+
+function alertRecoveryKey(userId: string, alertType: AlertType) {
+  return `alert-recovery:${alertType}:${userId}`;
+}
+
+function emitAlertResolved(alertId: string, userId: string, alertType: AlertType) {
+  emitToAdmins("alert:resolved", {
+    id: alertId,
+    userId,
+    alertType,
+  });
+}
+
+async function getOpenAlert(userId: string, alertType: AlertType) {
+  return prisma.alert.findFirst({
+    where: {
+      userId,
+      alertType,
+      resolved: false,
+    },
+    orderBy: {
+      triggeredAt: "desc",
+    },
+  });
+}
+
+async function clearRuleState(userId: string, alertType: AlertType) {
+  await ensureRedisConnection();
+  await redis.del([alertBreachKey(userId, alertType), alertRecoveryKey(userId, alertType)]);
+}
+
+async function resolveOpenAlert(userId: string, alertType: AlertType) {
+  const openAlerts = await prisma.alert.findMany({
+    where: {
+      userId,
+      alertType,
+      resolved: false,
+    },
+  });
+
+  if (openAlerts.length === 0) {
+    await clearRuleState(userId, alertType);
+    return;
+  }
+
+  await prisma.alert.updateMany({
+    where: {
+      userId,
+      alertType,
+      resolved: false,
+    },
+    data: {
+      resolved: true,
+    },
+  });
+
+  await clearRuleState(userId, alertType);
+
+  for (const alert of openAlerts) {
+    emitAlertResolved(alert.id, userId, alertType);
+  }
+}
+
+async function createAlert(context: AlertContext, alertType: AlertType, reason: string) {
+  const existingAlert = await getOpenAlert(context.userId, alertType);
+
+  if (existingAlert) {
+    return existingAlert;
+  }
+
+  const alert = await prisma.alert.create({
+    data: {
+      userId: context.userId,
+      reason,
+      alertType,
+    },
+  });
+
+  emitToAdmins("alert:triggered", {
+    id: alert.id,
+    userId: context.userId,
+    sessionId: context.sessionId,
+    name: context.name,
+    department: context.department,
+    score: context.metrics.score,
+    alertType,
+    reason,
+    triggeredAt: alert.triggeredAt.toISOString(),
+  });
+
+  return alert;
+}
+
+async function evaluateRule(context: AlertContext, evaluation: RuleEvaluation) {
+  await ensureRedisConnection();
+
+  const breachKey = alertBreachKey(context.userId, evaluation.alertType);
+  const recoveryKey = alertRecoveryKey(context.userId, evaluation.alertType);
+  const openAlert = await getOpenAlert(context.userId, evaluation.alertType);
+
+  if (evaluation.breachActive) {
+    await redis.del(recoveryKey);
+    const breachStartedAt = await redis.get(breachKey);
+
+    if (!breachStartedAt) {
+      await redis.set(breachKey, String(Date.now()), {
+        EX: Math.max(evaluation.breachAfterSeconds * 2, 60),
+      });
+      return;
+    }
+
+    const elapsedMs = Date.now() - Number(breachStartedAt);
+
+    if (elapsedMs >= evaluation.breachAfterSeconds * 1000 && !openAlert) {
+      await createAlert(context, evaluation.alertType, evaluation.reason);
+    }
+
+    return;
+  }
+
+  await redis.del(breachKey);
+
+  if (!openAlert) {
+    await redis.del(recoveryKey);
+    return;
+  }
+
+  if (!evaluation.recoveryActive) {
+    await redis.del(recoveryKey);
+    return;
+  }
+
+  const recoveryAfterSeconds = evaluation.recoveryAfterSeconds ?? 0;
+
+  if (recoveryAfterSeconds === 0) {
+    await resolveOpenAlert(context.userId, evaluation.alertType);
+    return;
+  }
+
+  const recoveryStartedAt = await redis.get(recoveryKey);
+
+  if (!recoveryStartedAt) {
+    await redis.set(recoveryKey, String(Date.now()), {
+      EX: Math.max(recoveryAfterSeconds * 2, 60),
+    });
+    return;
+  }
+
+  const elapsedMs = Date.now() - Number(recoveryStartedAt);
+
+  if (elapsedMs >= recoveryAfterSeconds * 1000) {
+    await resolveOpenAlert(context.userId, evaluation.alertType);
+  }
+}
+
+function buildRuleEvaluations(context: AlertContext, settings: AlertSettings): RuleEvaluation[] {
+  const erraticPattern = context.metrics.behavior.erraticScore > 2.5 && context.metrics.behavior.rhythmScore < 0.35;
+
+  return [
+    {
+      alertType: "low_score",
+      reason: `Score ${context.metrics.score} is below ${settings.scoreThreshold} for ${settings.durationMinutes} minutes`,
+      breachActive: context.metrics.score < settings.scoreThreshold,
+      breachAfterSeconds: settings.durationMinutes * 60,
+      recoveryActive: context.metrics.score >= settings.scoreThreshold,
+      recoveryAfterSeconds: 0,
+    },
+    {
+      alertType: "high_stress",
+      reason: `Stress score ${context.metrics.emotion.stressScore} stayed above 70 for 10 minutes`,
+      breachActive: context.metrics.emotion.stressScore > 70,
+      breachAfterSeconds: 10 * 60,
+      recoveryActive: context.metrics.emotion.stressScore < 50,
+      recoveryAfterSeconds: 5 * 60,
+    },
+    {
+      alertType: "head_away",
+      reason: `Looking away for ${context.metrics.behavior.lookingAwaySeconds} seconds`,
+      breachActive: context.metrics.behavior.lookingAway,
+      breachAfterSeconds: 5 * 60,
+      recoveryActive: !context.metrics.behavior.lookingAway,
+      recoveryAfterSeconds: 60,
+    },
+    {
+      alertType: "erratic_behavior",
+      reason: "Erratic behavior pattern detected from mouse and typing rhythm",
+      breachActive: erraticPattern,
+      breachAfterSeconds: 5 * 60,
+      recoveryActive: !erraticPattern,
+      recoveryAfterSeconds: 0,
+    },
+    {
+      alertType: "low_engagement",
+      reason: `Engagement score ${context.metrics.emotion.engagementScore} stayed below 25 for 20 minutes`,
+      breachActive: context.metrics.emotion.engagementScore < 25,
+      breachAfterSeconds: 20 * 60,
+      recoveryActive: context.metrics.emotion.engagementScore >= 35,
+      recoveryAfterSeconds: 5 * 60,
+    },
+  ];
 }
 
 export async function getAlertSettings(): Promise<AlertSettings> {
@@ -36,11 +257,22 @@ export async function updateAlertSettings(settings: AlertSettings) {
 }
 
 export async function clearAlertBreach(userId: string) {
-  await ensureRedisConnection();
-  await redis.del(alertBreachKey(userId));
+  await Promise.all(ALERT_TYPES.map((alertType) => clearRuleState(userId, alertType)));
 }
 
 export async function resolveOpenAlerts(userId: string) {
+  const openAlerts = await prisma.alert.findMany({
+    where: {
+      userId,
+      resolved: false,
+    },
+  });
+
+  if (openAlerts.length === 0) {
+    await clearAlertBreach(userId);
+    return;
+  }
+
   await prisma.alert.updateMany({
     where: {
       userId,
@@ -50,72 +282,19 @@ export async function resolveOpenAlerts(userId: string) {
       resolved: true,
     },
   });
-}
 
-type AlertContext = {
-  userId: string;
-  name: string;
-  department: string | null;
-  sessionId: string;
-  metrics: SessionMetrics;
-};
+  await clearAlertBreach(userId);
+
+  for (const alert of openAlerts) {
+    emitAlertResolved(alert.id, userId, alert.alertType as AlertType);
+  }
+}
 
 export async function evaluateAlert(context: AlertContext) {
   const settings = await getAlertSettings();
-  const breachKey = alertBreachKey(context.userId);
+  const evaluations = buildRuleEvaluations(context, settings);
 
-  if (context.metrics.score >= settings.scoreThreshold) {
-    await clearAlertBreach(context.userId);
-    await resolveOpenAlerts(context.userId);
-    return null;
+  for (const evaluation of evaluations) {
+    await evaluateRule(context, evaluation);
   }
-
-  await ensureRedisConnection();
-  const existingBreachTimestamp = await redis.get(breachKey);
-
-  if (!existingBreachTimestamp) {
-    await redis.set(breachKey, String(Date.now()), {
-      EX: settings.durationMinutes * 60 * 2,
-    });
-    return null;
-  }
-
-  const elapsedMs = Date.now() - Number(existingBreachTimestamp);
-
-  if (elapsedMs < settings.durationMinutes * 60 * 1000) {
-    return null;
-  }
-
-  const unresolvedAlert = await prisma.alert.findFirst({
-    where: {
-      userId: context.userId,
-      resolved: false,
-    },
-  });
-
-  if (unresolvedAlert) {
-    return unresolvedAlert;
-  }
-
-  const reason = `Score ${context.metrics.score} is below ${settings.scoreThreshold} for ${settings.durationMinutes} minutes`;
-
-  const alert = await prisma.alert.create({
-    data: {
-      userId: context.userId,
-      reason,
-    },
-  });
-
-  emitToAdmins("alert:triggered", {
-    id: alert.id,
-    userId: context.userId,
-    sessionId: context.sessionId,
-    name: context.name,
-    department: context.department,
-    score: context.metrics.score,
-    reason,
-    triggeredAt: alert.triggeredAt.toISOString(),
-  });
-
-  return alert;
 }

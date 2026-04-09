@@ -21,7 +21,7 @@ export function TimelinePanel({ session, loading = false }: TimelinePanelProps) 
       {session.events.map((event) => (
         <article key={event.id} className="timeline-item">
           <div>
-            <strong>{event.type.replaceAll("_", " ")}</strong>
+            <strong>{event.type.replace(/_/g, " ")}</strong>
             <p>{new Date(event.timestamp).toLocaleString()}</p>
           </div>
 

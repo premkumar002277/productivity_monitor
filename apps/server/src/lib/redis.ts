@@ -19,9 +19,12 @@ export async function ensureRedisConnection() {
   }
 
   if (!connectPromise) {
-    connectPromise = redis.connect().finally(() => {
-      connectPromise = null;
-    });
+    connectPromise = redis
+      .connect()
+      .then(() => undefined)
+      .finally(() => {
+        connectPromise = null;
+      });
   }
 
   await connectPromise;

@@ -9,7 +9,10 @@ export function registerRetentionCleanupJob() {
 
   queue.process(async () => {
     const result = await cleanupExpiredEvents();
-    logger.info(`Retention cleanup removed ${result.deletedCount} events older than ${result.cutoff}`);
+    logger.info(
+      `Retention cleanup removed ${result.deletedCount} raw records older than ${result.cutoff} ` +
+        `(events=${result.eventCount}, emotions=${result.emotionSampleCount}, headPose=${result.headPoseSampleCount}, behavior=${result.behaviorSampleCount})`,
+    );
   });
 
   queue.on("error", (error) => {
@@ -20,7 +23,7 @@ export function registerRetentionCleanupJob() {
     {},
     {
       jobId: "retention-cleanup",
-      repeat: { cron: "10 0 * * *" },
+      repeat: { cron: "20 0 * * *" },
       removeOnComplete: true,
       removeOnFail: 50,
     },

@@ -8,31 +8,35 @@ datasource db {
 }
 
 model User {
-  id           String      @id @default(uuid()) @db.Char(36)
-  name         String      @db.VarChar(100)
-  email        String      @unique @db.VarChar(150)
-  passwordHash String      @db.VarChar(255)
-  role         Role        @default(EMPLOYEE)
-  department   String?     @db.VarChar(100)
-  createdAt    DateTime    @default(now())
-  sessions     Session[]
-  alerts       Alert[]
-  dailyStats   DailyStat[]
+  id                String             @id @default(uuid()) @db.Char(36)
+  name              String             @db.VarChar(100)
+  email             String             @unique @db.VarChar(150)
+  passwordHash      String             @db.VarChar(255)
+  role              Role               @default(EMPLOYEE)
+  department        String?            @db.VarChar(100)
+  createdAt         DateTime           @default(now())
+  sessions          Session[]
+  alerts            Alert[]
+  dailyStats        DailyStat[]
+  dailyEmotionStats DailyEmotionStat[]
 
   @@index([role, department])
 }
 
 model Session {
-  id            String   @id @default(uuid()) @db.Char(36)
-  userId        String   @db.Char(36)
-  startedAt     DateTime @default(now())
-  endedAt       DateTime?
-  finalScore    Int?
-  faceSeconds   Int      @default(0)
-  idleSeconds   Int      @default(0)
-  activeSeconds Int      @default(0)
-  user          User     @relation(fields: [userId], references: [id])
-  events        Event[]
+  id              String           @id @default(uuid()) @db.Char(36)
+  userId          String           @db.Char(36)
+  startedAt       DateTime         @default(now())
+  endedAt         DateTime?
+  finalScore      Int?
+  faceSeconds     Int              @default(0)
+  idleSeconds     Int              @default(0)
+  activeSeconds   Int              @default(0)
+  user            User             @relation(fields: [userId], references: [id])
+  events          Event[]
+  emotionSamples  EmotionSample[]
+  headPoseSamples HeadPoseSample[]
+  behaviorSamples BehaviorSample[]
 
   @@index([userId, startedAt])
 }
@@ -67,11 +71,80 @@ model Alert {
   userId      String   @db.Char(36)
   triggeredAt DateTime @default(now())
   reason      String   @db.VarChar(255)
+  alertType   String   @default("low_score") @db.VarChar(50)
   resolved    Boolean  @default(false)
   user        User     @relation(fields: [userId], references: [id])
 
   @@index([userId, triggeredAt])
   @@index([resolved, triggeredAt])
+  @@index([userId, resolved, alertType])
+}
+
+model EmotionSample {
+  id              BigInt   @id @default(autoincrement())
+  sessionId       String   @db.Char(36)
+  timestamp       DateTime @default(now())
+  dominant        String   @db.VarChar(20)
+  happyScore      Decimal  @db.Decimal(4, 3)
+  sadScore        Decimal  @db.Decimal(4, 3)
+  angryScore      Decimal  @db.Decimal(4, 3)
+  fearfulScore    Decimal  @db.Decimal(4, 3)
+  disgustedScore  Decimal  @db.Decimal(4, 3)
+  surprisedScore  Decimal  @db.Decimal(4, 3)
+  neutralScore    Decimal  @db.Decimal(4, 3)
+  stressScore     Int
+  engagementScore Int
+  boredomScore    Int
+  session         Session  @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId, timestamp])
+}
+
+model HeadPoseSample {
+  id          BigInt   @id @default(autoincrement())
+  sessionId   String   @db.Char(36)
+  timestamp   DateTime @default(now())
+  yaw         Decimal  @db.Decimal(5, 3)
+  pitch       Decimal  @db.Decimal(5, 3)
+  roll        Decimal  @db.Decimal(5, 3)
+  lookingAway Boolean  @default(false)
+  session     Session  @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId, timestamp])
+}
+
+model BehaviorSample {
+  id            BigInt   @id @default(autoincrement())
+  sessionId     String   @db.Char(36)
+  timestamp     DateTime @default(now())
+  avgVelocityPx Int
+  clicksPerMin  Int
+  erraticScore  Decimal  @db.Decimal(5, 3)
+  kpm           Int
+  rhythmScore   Decimal  @db.Decimal(4, 3)
+  backspaceRate Decimal  @db.Decimal(4, 3)
+  burstDetected Boolean  @default(false)
+  idleSeconds   Int      @default(0)
+  session       Session  @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId, timestamp])
+}
+
+model DailyEmotionStat {
+  id              String   @id @default(uuid()) @db.Char(36)
+  userId          String   @db.Char(36)
+  date            DateTime @db.Date
+  avgStress       Decimal  @db.Decimal(5, 2)
+  avgEngagement   Decimal  @db.Decimal(5, 2)
+  avgBoredom      Decimal  @db.Decimal(5, 2)
+  dominantEmotion String   @db.VarChar(20)
+  avgHeadAwayPct  Decimal  @db.Decimal(5, 2)
+  avgTypingRhythm Decimal  @db.Decimal(4, 3)
+  avgErratic      Decimal  @db.Decimal(5, 3)
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+  @@index([date])
 }
 
 enum Role {
@@ -86,4 +159,8 @@ enum EventType {
   TAB_FOCUS
   IDLE_START
   IDLE_END
+  EMOTION_SAMPLE
+  HEAD_POSE_SAMPLE
+  MOUSE_BEHAVIOR
+  KEYBOARD_BEHAVIOR
 }

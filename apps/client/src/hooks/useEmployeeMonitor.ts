@@ -2,7 +2,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as faceapi from "face-api.js";
 
 import { FACE_MODEL_URL } from "../env";
-import type { EventBatchResult, MonitoringEventType } from "../types/api";
+import type {
+  BehaviorSnapshot,
+  EmotionSnapshot,
+  EventBatchResult,
+  HeadPoseSampleValue,
+  KeyboardBehaviorValue,
+  MonitoringEventType,
+  MouseBehaviorValue,
+} from "../types/api";
+import { buildEmotionSample, createEmptyEmotionScores, deriveEmotionMetrics } from "./useEmotionDetector";
+import { estimateHeadPose } from "./useHeadPoseEstimator";
+import { useKeyboardBehavior } from "./useKeyboardBehavior";
+import { useMouseBehavior } from "./useMouseBehavior";
 
 type ApiFetch = <T>(path: string, options?: RequestInit & { auth?: boolean }) => Promise<T>;
 
@@ -16,6 +28,33 @@ type UseEmployeeMonitorParams = {
   enabled: boolean;
   sessionId: string | null;
   apiFetch: ApiFetch;
+};
+
+const EMPTY_EMOTION_STATE: EmotionSnapshot = {
+  dominant: null,
+  scores: createEmptyEmotionScores(),
+  stressScore: 0,
+  engagementScore: 0,
+  boredomScore: 0,
+  updatedAt: null,
+};
+
+const EMPTY_BEHAVIOR_STATE: BehaviorSnapshot = {
+  yaw: 0,
+  pitch: 0,
+  roll: 0,
+  lookingAway: false,
+  lookingAwaySeconds: 0,
+  headAwayRatio: 0,
+  avgVelocityPx: 0,
+  clicksPerMin: 0,
+  erraticScore: 0,
+  idleSeconds: 0,
+  kpm: 0,
+  rhythmScore: 0,
+  backspaceRate: 0,
+  burstDetected: false,
+  updatedAt: null,
 };
 
 function createEvent(type: MonitoringEventType, value?: unknown): EventDraft {
@@ -43,11 +82,29 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
     idle: false,
     confidence: null as number | null,
   });
+  const [emotionState, setEmotionState] = useState<EmotionSnapshot>(EMPTY_EMOTION_STATE);
+  const [headPoseState, setHeadPoseState] = useState<(HeadPoseSampleValue & { updatedAt: string | null })>({
+    yaw: 0,
+    pitch: 0,
+    roll: 0,
+    lookingAway: false,
+    updatedAt: null,
+  });
+
+  const mouseBehavior = useMouseBehavior(Boolean(enabled && sessionId));
+  const keyboardBehavior = useKeyboardBehavior(Boolean(enabled && sessionId));
 
   const pushEvent = useCallback((type: MonitoringEventType, value?: unknown) => {
     queueRef.current.push(createEvent(type, value));
     setQueueSize(queueRef.current.length);
   }, []);
+
+  const queueBehaviorWindow = useCallback(() => {
+    const mouseSummary: MouseBehaviorValue = mouseBehavior.flushSummary();
+    const keyboardSummary: KeyboardBehaviorValue = keyboardBehavior.flushSummary();
+    pushEvent("MOUSE_BEHAVIOR", mouseSummary);
+    pushEvent("KEYBOARD_BEHAVIOR", keyboardSummary);
+  }, [keyboardBehavior, mouseBehavior, pushEvent]);
 
   const flushQueue = useCallback(async () => {
     if (!sessionId || syncInFlightRef.current) {
@@ -82,12 +139,29 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
     }
   }, [apiFetch, sessionId]);
 
+  const flushNow = useCallback(async () => {
+    if (!enabled || !sessionId) {
+      return;
+    }
+
+    queueBehaviorWindow();
+    await flushQueue();
+  }, [enabled, flushQueue, queueBehaviorWindow, sessionId]);
+
   useEffect(() => {
     if (!enabled || !sessionId) {
       queueRef.current = [];
       setQueueSize(0);
       setCameraStatus("idle");
       setFaceModelStatus("idle");
+      setEmotionState(EMPTY_EMOTION_STATE);
+      setHeadPoseState({
+        yaw: 0,
+        pitch: 0,
+        roll: 0,
+        lookingAway: false,
+        updatedAt: null,
+      });
       return;
     }
 
@@ -137,39 +211,63 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
         }
 
         try {
-          const detection = await faceapi.detectSingleFace(
-            video,
-            new faceapi.TinyFaceDetectorOptions({
-              inputSize: 224,
-              scoreThreshold: 0.6,
-            }),
-          );
+          const detection = await faceapi
+            .detectSingleFace(
+              video,
+              new faceapi.TinyFaceDetectorOptions({
+                inputSize: 224,
+                scoreThreshold: 0.6,
+              }),
+            )
+            .withFaceLandmarks()
+            .withFaceExpressions();
 
           if (disposed) {
             return;
           }
 
-          if (detection && detection.score >= 0.6) {
+          if (detection && detection.detection.score >= 0.6) {
+            const detectionTimestamp = new Date().toISOString();
+            const confidence = Number(detection.detection.score.toFixed(2));
+            const emotionSample = buildEmotionSample(detection.expressions as unknown as Record<string, number>);
+            const emotionMetrics = deriveEmotionMetrics(emotionSample.scores);
+            const headPoseSample = estimateHeadPose(detection.landmarks.positions, {
+              width: detection.detection.box.width,
+              height: detection.detection.box.height,
+            });
+
             lastFaceSeenAt = Date.now();
             setSignalState((current) => ({
               ...current,
               faceDetected: true,
-              confidence: Number(detection.score.toFixed(2)),
+              confidence,
             }));
+            setEmotionState({
+              dominant: emotionSample.dominant,
+              scores: emotionSample.scores,
+              stressScore: emotionMetrics.stressScore,
+              engagementScore: emotionMetrics.engagementScore,
+              boredomScore: emotionMetrics.boredomScore,
+              updatedAt: detectionTimestamp,
+            });
+            setHeadPoseState({
+              ...headPoseSample,
+              updatedAt: detectionTimestamp,
+            });
 
             if (!facePresent) {
               facePresent = true;
-              pushEvent("FACE_DETECTED", {
-                confidence: Number(detection.score.toFixed(2)),
-              });
+              pushEvent("FACE_DETECTED", { confidence });
             }
 
+            pushEvent("EMOTION_SAMPLE", emotionSample);
+            pushEvent("HEAD_POSE_SAMPLE", headPoseSample);
             return;
           }
 
           setSignalState((current) => ({
             ...current,
-            confidence: detection ? Number(detection.score.toFixed(2)) : null,
+            confidence: detection ? Number(detection.detection.score.toFixed(2)) : null,
           }));
 
           if (facePresent && Date.now() - lastFaceSeenAt >= 60_000) {
@@ -179,7 +277,7 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
           }
         } catch {
           setFaceModelStatus("unavailable");
-          setError("Face detection models are missing. Add TinyFaceDetector files to public/models.");
+          setError("Face models are missing. Add TinyFaceDetector, landmark, and expression files to public/models.");
 
           if (faceInterval) {
             window.clearInterval(faceInterval);
@@ -227,18 +325,23 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
       }
 
       try {
-        await faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL);
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL),
+          faceapi.nets.faceExpressionNet.loadFromUri(FACE_MODEL_URL),
+        ]);
+
         if (!disposed) {
           setFaceModelStatus("ready");
           startFaceDetection();
         }
       } catch {
         setFaceModelStatus("unavailable");
-        setError("Face detection models were not found. Tab and idle tracking will keep working.");
+        setError("Face detection models were not found. Tab, idle, mouse, and keyboard tracking will keep working.");
       }
 
       document.addEventListener("visibilitychange", handleVisibilityChange);
-      window.addEventListener("mousemove", handleActivity);
+      window.addEventListener("mousemove", handleActivity, { passive: true });
       window.addEventListener("keydown", handleActivity);
 
       idleInterval = window.setInterval(() => {
@@ -250,6 +353,7 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
       }, 1_000);
 
       syncInterval = window.setInterval(() => {
+        queueBehaviorWindow();
         void flushQueue();
       }, 5_000);
     };
@@ -276,7 +380,7 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
 
       stopStream();
     };
-  }, [apiFetch, enabled, flushQueue, pushEvent, sessionId]);
+  }, [apiFetch, enabled, flushQueue, pushEvent, queueBehaviorWindow, sessionId]);
 
   return {
     videoRef,
@@ -288,6 +392,10 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
     lastSyncAt,
     serverMetrics,
     signalState,
-    flushNow: flushQueue,
+    emotionState,
+    headPoseState,
+    mouseState: mouseBehavior.summary,
+    keyboardState: keyboardBehavior.summary,
+    flushNow,
   };
 }

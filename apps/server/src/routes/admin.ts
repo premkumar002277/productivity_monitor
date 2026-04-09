@@ -8,7 +8,14 @@ import { requireRole } from "../middleware/requireRole";
 import { prisma } from "../lib/prisma";
 import { getAlertSettings, updateAlertSettings } from "../services/alerts";
 import { getEmployeeDashboard, getSessionTimeline } from "../services/dashboard";
-import { exportSessionsCsv, getDailyStats } from "../services/reporter";
+import {
+  exportEmotionReportCsv,
+  exportSessionsCsv,
+  getBehaviorTimeline,
+  getDailyEmotionStats,
+  getDailyStats,
+  getEmotionTimeline,
+} from "../services/reporter";
 
 const router = Router();
 
@@ -23,9 +30,18 @@ const timelineParamsSchema = z.object({
   sessionId: z.string().uuid(),
 });
 
+const employeeParamsSchema = z.object({
+  employeeId: z.string().uuid(),
+});
+
 const dailyStatsQuerySchema = z.object({
   userId: z.string().uuid().optional(),
   days: z.coerce.number().int().min(1).max(30).default(7),
+});
+
+const timelineRangeQuerySchema = z.object({
+  startDate: z.coerce.date().optional(),
+  endDate: z.coerce.date().optional(),
 });
 
 const alertSettingsSchema = z.object({
@@ -37,6 +53,11 @@ const exportQuerySchema = z.object({
   userId: z.string().uuid().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
+});
+
+const emotionReportQuerySchema = z.object({
+  date: z.coerce.date().optional(),
+  department: z.string().min(1).optional(),
 });
 
 const resolveAlertParamsSchema = z.object({
@@ -67,10 +88,42 @@ router.get(
 );
 
 router.get(
+  "/employees/:employeeId/emotions",
+  asyncHandler(async (req, res) => {
+    const params = employeeParamsSchema.parse(req.params);
+    const query = timelineRangeQuerySchema.parse(req.query);
+    const timeline = await getEmotionTimeline(params.employeeId, query.startDate, query.endDate);
+    res.json({ timeline });
+  }),
+);
+
+router.get(
+  "/employees/:employeeId/behavior",
+  asyncHandler(async (req, res) => {
+    const params = employeeParamsSchema.parse(req.params);
+    const query = timelineRangeQuerySchema.parse(req.query);
+    const timeline = await getBehaviorTimeline(params.employeeId, query.startDate, query.endDate);
+    res.json({ timeline });
+  }),
+);
+
+router.get(
   "/reports/daily",
   asyncHandler(async (req, res) => {
     const query = dailyStatsQuerySchema.parse(req.query);
     const stats = await getDailyStats(query.userId, query.days);
+    res.json({ stats });
+  }),
+);
+
+router.get(
+  "/reports/emotions",
+  asyncHandler(async (req, res) => {
+    const query = emotionReportQuerySchema.parse(req.query);
+    const stats = await getDailyEmotionStats({
+      date: query.date,
+      department: query.department,
+    });
     res.json({ stats });
   }),
 );
@@ -87,6 +140,21 @@ router.get(
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", "attachment; filename=workwatch-report.csv");
+    res.send(csv);
+  }),
+);
+
+router.get(
+  "/reports/emotions/csv",
+  asyncHandler(async (req, res) => {
+    const query = emotionReportQuerySchema.parse(req.query);
+    const csv = await exportEmotionReportCsv({
+      date: query.date,
+      department: query.department,
+    });
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", "attachment; filename=workwatch-emotion-report.csv");
     res.send(csv);
   }),
 );
@@ -119,6 +187,7 @@ router.get(
       alerts: alerts.map((alert) => ({
         id: alert.id,
         reason: alert.reason,
+        alertType: alert.alertType,
         resolved: alert.resolved,
         triggeredAt: alert.triggeredAt.toISOString(),
         user: alert.user,

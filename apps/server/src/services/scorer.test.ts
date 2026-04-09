@@ -3,7 +3,7 @@ import { EventType } from "@prisma/client";
 import { computeSessionMetrics } from "./scorer";
 
 describe("computeSessionMetrics", () => {
-  it("calculates a blended productivity score from face, focus, and idle signals", () => {
+  it("calculates the updated baseline productivity score when no emotion or behavior samples are present", () => {
     const startedAt = new Date("2026-04-09T09:00:00.000Z");
     const endedAt = new Date("2026-04-09T09:10:00.000Z");
 
@@ -25,7 +25,9 @@ describe("computeSessionMetrics", () => {
     expect(metrics.faceSeconds).toBe(600);
     expect(metrics.activeSeconds).toBe(480);
     expect(metrics.idleSeconds).toBe(120);
-    expect(metrics.score).toBe(90);
-    expect(metrics.status).toBe("active");
+    expect(metrics.score).toBe(63);
+    expect(metrics.status).toBe("idle");
+    expect(metrics.emotion.stressScore).toBe(0);
+    expect(metrics.behavior.erraticScore).toBe(0);
   });
 });

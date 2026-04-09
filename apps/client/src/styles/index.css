@@ -113,6 +113,7 @@ a {
 }
 
 .hero-panel__grid,
+.team-summary-grid,
 .department-grid,
 .metric-grid,
 .signal-grid {
@@ -365,6 +366,11 @@ a {
   background: rgba(223, 139, 45, 0.14);
 }
 
+.status-badge--low {
+  color: #ba5b18;
+  background: rgba(213, 121, 22, 0.16);
+}
+
 .status-badge--away {
   color: var(--danger);
   background: rgba(191, 73, 50, 0.12);
@@ -411,6 +417,10 @@ a {
   margin: 0.9rem 0 0.75rem;
 }
 
+.employee-card__badge-row {
+  margin-bottom: 0.8rem;
+}
+
 .employee-card__score strong {
   font-size: 2.4rem;
   line-height: 1;
@@ -436,6 +446,10 @@ a {
   background: linear-gradient(90deg, #d57916 0%, #efab42 100%);
 }
 
+.employee-card__meter-fill--low {
+  background: linear-gradient(90deg, #d26613 0%, #f19c3f 100%);
+}
+
 .employee-card__meter-fill--away {
   background: linear-gradient(90deg, #bf4932 0%, #df6a48 100%);
 }
@@ -458,6 +472,185 @@ a {
 .chart-shell {
   width: 100%;
   height: 260px;
+}
+
+.chart-shell--tall {
+  height: 320px;
+}
+
+.team-summary-grid,
+.behavior-chart-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.team-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 1rem;
+}
+
+.behavior-chart-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-summary-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.tab-row {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.tab-button {
+  border: 1px solid rgba(19, 43, 43, 0.08);
+  border-radius: 999px;
+  padding: 0.7rem 1rem;
+  background: rgba(19, 43, 43, 0.05);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.tab-button--active {
+  background: var(--panel-strong);
+  color: var(--ink);
+  box-shadow: 0 12px 28px rgba(19, 43, 43, 0.08);
+}
+
+.emotion-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.emotion-badge--happy,
+.emotion-badge--neutral {
+  background: rgba(10, 122, 85, 0.12);
+  color: var(--success);
+}
+
+.emotion-badge--sad,
+.emotion-badge--fearful {
+  background: rgba(15, 110, 145, 0.12);
+  color: #0f6e91;
+}
+
+.emotion-badge--angry {
+  background: rgba(191, 73, 50, 0.12);
+  color: var(--danger);
+}
+
+.emotion-badge--disgusted {
+  background: rgba(213, 121, 22, 0.12);
+  color: #ba5b18;
+}
+
+.emotion-badge--surprised {
+  background: rgba(16, 125, 123, 0.12);
+  color: #107d7b;
+}
+
+.emotion-meter-stack {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.emotion-meter {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.emotion-meter__label {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.emotion-meter__track {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(19, 43, 43, 0.08);
+  overflow: hidden;
+}
+
+.emotion-meter__fill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.emotion-meter__fill--stress {
+  background: linear-gradient(90deg, #bf4932 0%, #e4775a 100%);
+}
+
+.emotion-meter__fill--engagement {
+  background: linear-gradient(90deg, #166a5c 0%, #2da57e 100%);
+}
+
+.emotion-meter__fill--boredom {
+  background: linear-gradient(90deg, #d57916 0%, #efab42 100%);
+}
+
+.behavior-indicator-row,
+.alert-chip-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.behavior-pill,
+.alert-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.behavior-pill--ok {
+  background: rgba(10, 122, 85, 0.12);
+  color: var(--success);
+}
+
+.behavior-pill--warn {
+  background: rgba(213, 121, 22, 0.12);
+  color: #ba5b18;
+}
+
+.alert-chip {
+  background: rgba(19, 43, 43, 0.06);
+  color: var(--ink);
+  text-transform: capitalize;
+}
+
+.alert-chip--low_score,
+.alert-chip--high_stress {
+  background: rgba(191, 73, 50, 0.12);
+  color: var(--danger);
+}
+
+.alert-chip--head_away,
+.alert-chip--erratic_behavior {
+  background: rgba(213, 121, 22, 0.14);
+  color: #ba5b18;
+}
+
+.alert-chip--low_engagement {
+  background: rgba(15, 110, 145, 0.12);
+  color: #0f6e91;
 }
 
 .timeline-item,
@@ -511,9 +704,11 @@ a {
   }
 
   .hero-panel__grid,
+  .team-summary-grid,
   .department-grid,
   .metric-grid,
-  .signal-grid {
+  .signal-grid,
+  .behavior-chart-grid {
     grid-template-columns: 1fr;
   }
 
@@ -521,7 +716,8 @@ a {
   .panel__header,
   .employee-card__header,
   .employee-card__footer,
-  .alert-card {
+  .alert-card,
+  .emotion-meter__label {
     flex-direction: column;
   }
 }
