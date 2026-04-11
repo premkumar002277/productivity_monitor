@@ -110,6 +110,12 @@ export function EmployeePage() {
     setActionError(null);
 
     try {
+      const stream = await monitor.requestCameraAccess();
+
+      if (!stream) {
+        return;
+      }
+
       const existingSessionId = activeSessionQuery.data?.session?.id;
 
       if (existingSessionId) {
@@ -132,6 +138,7 @@ export function EmployeePage() {
       setMonitoringEnabled(true);
       await queryClient.invalidateQueries({ queryKey: ["employee-active-session"] });
     } catch (startError) {
+      monitor.stopCamera();
       setActionError(startError instanceof Error ? startError.message : "Unable to start monitoring.");
     }
   };

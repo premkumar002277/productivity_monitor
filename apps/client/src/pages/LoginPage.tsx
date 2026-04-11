@@ -58,8 +58,8 @@ export function LoginPage() {
     <div className="login-shell">
       <section className="hero-panel">
         <div className="hero-panel__copy">
-          <span className="eyebrow">WorkWatch Blueprint</span>
-          <h1>Monitor focus responsibly, see productivity live, and keep the stack ready for MySQL + Redis.</h1>
+          <span className="eyebrow">WorkWatch</span>
+          <h1>Monitor focus responsibly, see productivity live</h1>
           <p>
             This starter includes employee monitoring, server-side scoring, real-time admin updates, rollup jobs, and
             a role-aware React interface built from the provided blueprint.

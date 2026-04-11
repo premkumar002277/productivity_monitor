@@ -30,6 +30,8 @@ type UseEmployeeMonitorParams = {
   apiFetch: ApiFetch;
 };
 
+type CameraStatus = "idle" | "requesting" | "ready" | "error";
+
 const EMPTY_EMOTION_STATE: EmotionSnapshot = {
   dominant: null,
   scores: createEmptyEmotionScores(),
@@ -57,6 +59,14 @@ const EMPTY_BEHAVIOR_STATE: BehaviorSnapshot = {
   updatedAt: null,
 };
 
+function areFaceModelsLoaded() {
+  return (
+    faceapi.nets.tinyFaceDetector.isLoaded &&
+    faceapi.nets.faceLandmark68Net.isLoaded &&
+    faceapi.nets.faceExpressionNet.isLoaded
+  );
+}
+
 function createEvent(type: MonitoringEventType, value?: unknown): EventDraft {
   return {
     type,
@@ -65,12 +75,50 @@ function createEvent(type: MonitoringEventType, value?: unknown): EventDraft {
   };
 }
 
+function getCameraErrorDetails(cameraError: unknown) {
+  if (cameraError instanceof DOMException) {
+    return {
+      name: cameraError.name,
+      message: cameraError.message,
+    };
+  }
+
+  if (cameraError instanceof Error) {
+    return {
+      name: cameraError.name,
+      message: cameraError.message,
+    };
+  }
+
+  return {
+    name: "UnknownError",
+    message: "An unknown camera error occurred.",
+  };
+}
+
+function getCameraErrorMessage(cameraError: unknown) {
+  const { name, message } = getCameraErrorDetails(cameraError);
+
+  switch (name) {
+    case "NotAllowedError":
+      return "Camera access was denied. Monitoring cannot start without consent.";
+    case "NotFoundError":
+      return "No camera device was found on this machine.";
+    case "NotReadableError":
+      return "The camera is already in use by another application.";
+    default:
+      return `Camera error (${name}): ${message}`;
+  }
+}
+
 export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployeeMonitorParams) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const cameraRequestRef = useRef<Promise<MediaStream | null> | null>(null);
   const queueRef = useRef<EventDraft[]>([]);
   const syncInFlightRef = useRef(false);
   const [queueSize, setQueueSize] = useState(0);
-  const [cameraStatus, setCameraStatus] = useState<"idle" | "requesting" | "ready" | "error">("idle");
+  const [cameraStatus, setCameraStatus] = useState<CameraStatus>("idle");
   const [faceModelStatus, setFaceModelStatus] = useState<"idle" | "ready" | "unavailable">("idle");
   const [error, setError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -91,8 +139,8 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
     updatedAt: null,
   });
 
-  const mouseBehavior = useMouseBehavior(Boolean(enabled && sessionId));
-  const keyboardBehavior = useKeyboardBehavior(Boolean(enabled && sessionId));
+  const { summary: mouseState, flushSummary: flushMouseBehavior } = useMouseBehavior(Boolean(enabled && sessionId));
+  const { summary: keyboardState, flushSummary: flushKeyboardBehavior } = useKeyboardBehavior(Boolean(enabled && sessionId));
 
   const pushEvent = useCallback((type: MonitoringEventType, value?: unknown) => {
     queueRef.current.push(createEvent(type, value));
@@ -100,11 +148,11 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
   }, []);
 
   const queueBehaviorWindow = useCallback(() => {
-    const mouseSummary: MouseBehaviorValue = mouseBehavior.flushSummary();
-    const keyboardSummary: KeyboardBehaviorValue = keyboardBehavior.flushSummary();
+    const mouseSummary: MouseBehaviorValue = flushMouseBehavior();
+    const keyboardSummary: KeyboardBehaviorValue = flushKeyboardBehavior();
     pushEvent("MOUSE_BEHAVIOR", mouseSummary);
     pushEvent("KEYBOARD_BEHAVIOR", keyboardSummary);
-  }, [keyboardBehavior, mouseBehavior, pushEvent]);
+  }, [flushKeyboardBehavior, flushMouseBehavior, pushEvent]);
 
   const flushQueue = useCallback(async () => {
     if (!sessionId || syncInFlightRef.current) {
@@ -148,6 +196,101 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
     await flushQueue();
   }, [enabled, flushQueue, queueBehaviorWindow, sessionId]);
 
+  const stopCamera = useCallback((nextStatus: CameraStatus = "idle") => {
+    const currentStream = streamRef.current;
+
+    if (currentStream) {
+      currentStream.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+
+    cameraRequestRef.current = null;
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
+    setCameraStatus(nextStatus);
+  }, []);
+
+  const attachStreamToVideo = useCallback(async (stream: MediaStream) => {
+    const video = videoRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    video.srcObject = stream;
+
+    try {
+      await video.play();
+    } catch (playError) {
+      console.error("Camera preview error:", playError);
+    }
+  }, []);
+
+  const requestCameraAccess = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraStatus("error");
+      setError("This browser does not support camera capture.");
+      return null;
+    }
+
+    if (streamRef.current) {
+      setError(null);
+      await attachStreamToVideo(streamRef.current);
+      setCameraStatus("ready");
+      return streamRef.current;
+    }
+
+    if (cameraRequestRef.current) {
+      return cameraRequestRef.current;
+    }
+
+    setError(null);
+    setCameraStatus("requesting");
+
+    const cameraRequest = navigator.mediaDevices
+      .getUserMedia({
+        video: {
+          width: { ideal: 960 },
+          height: { ideal: 540 },
+        },
+        audio: false,
+      })
+      .then(async (stream) => {
+        streamRef.current = stream;
+        cameraRequestRef.current = null;
+        await attachStreamToVideo(stream);
+        setCameraStatus("ready");
+        return stream;
+      })
+      .catch((cameraError: unknown) => {
+        const { name, message } = getCameraErrorDetails(cameraError);
+
+        cameraRequestRef.current = null;
+        console.error("Camera error:", name, message);
+        setCameraStatus("error");
+        setError(getCameraErrorMessage(cameraError));
+        return null;
+      });
+
+    cameraRequestRef.current = cameraRequest;
+    return cameraRequest;
+  }, [attachStreamToVideo]);
+
+  const loadFaceModels = useCallback(async () => {
+    if (areFaceModelsLoaded()) {
+      return;
+    }
+
+    await Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
+      faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL),
+      faceapi.nets.faceExpressionNet.loadFromUri(FACE_MODEL_URL),
+    ]);
+  }, []);
+
   useEffect(() => {
     if (!enabled || !sessionId) {
       queueRef.current = [];
@@ -168,7 +311,6 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
     queueRef.current = [];
     setQueueSize(0);
     let disposed = false;
-    let stream: MediaStream | null = null;
     let faceInterval: number | undefined;
     let idleInterval: number | undefined;
     let syncInterval: number | undefined;
@@ -176,15 +318,6 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
     let isIdle = false;
     let facePresent = false;
     let lastFaceSeenAt = 0;
-
-    const stopStream = () => {
-      if (!stream) {
-        return;
-      }
-
-      stream.getTracks().forEach((track) => track.stop());
-      stream = null;
-    };
 
     const handleActivity = () => {
       lastActivityAt = Date.now();
@@ -206,7 +339,11 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
       faceInterval = window.setInterval(async () => {
         const video = videoRef.current;
 
-        if (!video || video.readyState < 2) {
+        if (!video || video.readyState < 2 || video.paused || video.ended) {
+          return;
+        }
+
+        if (!areFaceModelsLoaded()) {
           return;
         }
 
@@ -275,7 +412,8 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
             setSignalState((current) => ({ ...current, faceDetected: false }));
             pushEvent("FACE_LOST", { reason: "timeout" });
           }
-        } catch {
+        } catch (detectionError) {
+          console.error("Face detection error:", detectionError);
           setFaceModelStatus("unavailable");
           setError("Face models are missing. Add TinyFaceDetector, landmark, and expression files to public/models.");
 
@@ -286,56 +424,26 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
       }, 2_000);
     };
 
-    const startMonitoring = async () => {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setCameraStatus("error");
-        setError("This browser does not support camera capture.");
-        return;
-      }
+    const initializeMonitoring = async () => {
+      const stream = await requestCameraAccess();
 
-      setError(null);
-      setCameraStatus("requesting");
-
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 960 },
-            height: { ideal: 540 },
-          },
-          audio: false,
-        });
-
+      if (!stream || disposed) {
         if (disposed) {
-          stopStream();
-          return;
+          stopCamera();
         }
 
-        const video = videoRef.current;
-
-        if (video) {
-          video.srcObject = stream;
-          await video.play().catch(() => undefined);
-        }
-
-        setCameraStatus("ready");
-      } catch {
-        setCameraStatus("error");
-        setError("Camera access was denied. Monitoring cannot start without consent.");
         return;
       }
 
       try {
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri(FACE_MODEL_URL),
-          faceapi.nets.faceLandmark68Net.loadFromUri(FACE_MODEL_URL),
-          faceapi.nets.faceExpressionNet.loadFromUri(FACE_MODEL_URL),
-        ]);
+        await loadFaceModels();
 
         if (!disposed) {
           setFaceModelStatus("ready");
           startFaceDetection();
         }
-      } catch {
+      } catch (modelError) {
+        console.error("Face model loading error:", modelError);
         setFaceModelStatus("unavailable");
         setError("Face detection models were not found. Tab, idle, mouse, and keyboard tracking will keep working.");
       }
@@ -358,7 +466,7 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
       }, 5_000);
     };
 
-    void startMonitoring();
+    void initializeMonitoring();
 
     return () => {
       disposed = true;
@@ -378,9 +486,9 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
         window.clearInterval(syncInterval);
       }
 
-      stopStream();
+      stopCamera();
     };
-  }, [apiFetch, enabled, flushQueue, pushEvent, queueBehaviorWindow, sessionId]);
+  }, [apiFetch, enabled, flushQueue, loadFaceModels, pushEvent, queueBehaviorWindow, requestCameraAccess, sessionId, stopCamera]);
 
   return {
     videoRef,
@@ -394,8 +502,10 @@ export function useEmployeeMonitor({ enabled, sessionId, apiFetch }: UseEmployee
     signalState,
     emotionState,
     headPoseState,
-    mouseState: mouseBehavior.summary,
-    keyboardState: keyboardBehavior.summary,
+    mouseState,
+    keyboardState,
+    requestCameraAccess,
+    stopCamera,
     flushNow,
   };
 }
