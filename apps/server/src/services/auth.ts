@@ -17,8 +17,13 @@ type RegisterInput = {
   name: string;
   email: string;
   password: string;
+};
+
+type CreateEmployeeInput = {
+  name: string;
+  email: string;
+  password: string;
   department?: string | null;
-  role?: Role;
 };
 
 type LoginInput = {
@@ -41,6 +46,20 @@ function refreshTokenKey(tokenId: string) {
   return `refresh:${tokenId}`;
 }
 
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+async function ensureUserEmailAvailable(email: string) {
+  const existingUser = await prisma.user.findUnique({
+    where: { email },
+  });
+
+  if (existingUser) {
+    throw new AppError(409, "A user with this email already exists");
+  }
+}
+
 async function issueTokenBundle(user: User) {
   const tokenId = randomUUID();
   const baseUser = {
@@ -49,6 +68,7 @@ async function issueTokenBundle(user: User) {
     name: user.name,
     role: user.role,
     department: user.department,
+    createdByAdminId: user.createdByAdminId,
   };
 
   const accessToken = issueAccessToken(baseUser);
@@ -66,15 +86,8 @@ async function issueTokenBundle(user: User) {
 }
 
 export async function registerUser(input: RegisterInput) {
-  const email = input.email.trim().toLowerCase();
-
-  const existingUser = await prisma.user.findUnique({
-    where: { email },
-  });
-
-  if (existingUser) {
-    throw new AppError(409, "A user with this email already exists");
-  }
+  const email = normalizeEmail(input.email);
+  await ensureUserEmailAvailable(email);
 
   const passwordHash = await bcrypt.hash(input.password, env.BCRYPT_ROUNDS);
 
@@ -83,8 +96,9 @@ export async function registerUser(input: RegisterInput) {
       name: input.name.trim(),
       email,
       passwordHash,
-      department: input.department?.trim() || null,
-      role: input.role ?? Role.EMPLOYEE,
+      department: null,
+      role: Role.ADMIN,
+      createdByAdminId: null,
     },
   });
 
@@ -92,6 +106,24 @@ export async function registerUser(input: RegisterInput) {
     user: sanitizeUser(user),
     tokens: await issueTokenBundle(user),
   };
+}
+
+export async function createEmployeeUser(adminId: string, input: CreateEmployeeInput) {
+  const email = normalizeEmail(input.email);
+  await ensureUserEmailAvailable(email);
+
+  const passwordHash = await bcrypt.hash(input.password, env.BCRYPT_ROUNDS);
+
+  return prisma.user.create({
+    data: {
+      name: input.name.trim(),
+      email,
+      passwordHash,
+      department: input.department?.trim() || null,
+      role: Role.EMPLOYEE,
+      createdByAdminId: adminId,
+    },
+  });
 }
 
 export async function loginUser(input: LoginInput) {

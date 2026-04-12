@@ -44,9 +44,10 @@ function createEmptyBehaviorSnapshot() {
   };
 }
 
-export async function getEmployeeDashboard(filters: { department?: string; search?: string }) {
+export async function getEmployeeDashboard(adminId: string, filters: { department?: string; search?: string }) {
   const where = {
     role: Role.EMPLOYEE,
+    createdByAdminId: adminId,
     ...(filters.department ? { department: filters.department } : {}),
     ...(filters.search
       ? {
@@ -306,7 +307,7 @@ export async function getEmployeeDashboard(filters: { department?: string; searc
   };
 }
 
-export async function getSessionTimeline(sessionId: string) {
+export async function getSessionTimeline(sessionId: string, adminId: string) {
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
     include: {
@@ -316,6 +317,7 @@ export async function getSessionTimeline(sessionId: string) {
           name: true,
           email: true,
           department: true,
+          createdByAdminId: true,
         },
       },
       events: {
@@ -330,6 +332,10 @@ export async function getSessionTimeline(sessionId: string) {
     return null;
   }
 
+  if (session.user.createdByAdminId !== adminId) {
+    return null;
+  }
+
   return {
     id: session.id,
     userId: session.userId,
@@ -339,7 +345,12 @@ export async function getSessionTimeline(sessionId: string) {
     faceSeconds: session.faceSeconds,
     activeSeconds: session.activeSeconds,
     idleSeconds: session.idleSeconds,
-    user: session.user,
+    user: {
+      id: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+      department: session.user.department,
+    },
     events: session.events.map((event) => ({
       id: event.id.toString(),
       type: event.type,

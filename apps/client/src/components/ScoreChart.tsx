@@ -14,9 +14,31 @@ type ScoreChartProps = {
   stats: DailyStat[];
 };
 
+function DailyTrendsEmptyState() {
+  const placeholderBars = [30, 48, 40, 58, 72, 18];
+
+  return (
+    <div className="empty-state empty-state--chart">
+      <div className="empty-state__chart-bars" aria-hidden="true">
+        {placeholderBars.map((height, index) => (
+          <div key={height} className={`empty-state__chart-bar ${index === placeholderBars.length - 1 ? "empty-state__chart-bar--ghost" : ""}`}>
+            <span style={{ height: `${height}%` }} />
+          </div>
+        ))}
+      </div>
+
+      <div className="empty-state__content">
+        <strong>Daily trends will appear here</strong>
+        <p>Once this employee has closed sessions and the daily rollup runs, score history will fill this chart automatically.</p>
+        <code className="empty-state__hint">npm run rollup:daily</code>
+      </div>
+    </div>
+  );
+}
+
 export function ScoreChart({ stats }: ScoreChartProps) {
   if (stats.length === 0) {
-    return <div className="empty-state">No daily rollups yet. Once sessions are closed and the job runs, trends appear here.</div>;
+    return <DailyTrendsEmptyState />;
   }
 
   return (

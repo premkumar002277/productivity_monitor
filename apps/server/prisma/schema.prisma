@@ -12,15 +12,19 @@ model User {
   name              String             @db.VarChar(100)
   email             String             @unique @db.VarChar(150)
   passwordHash      String             @db.VarChar(255)
-  role              Role               @default(EMPLOYEE)
+  role              Role               @default(ADMIN)
   department        String?            @db.VarChar(100)
+  createdByAdminId  String?            @db.Char(36)
   createdAt         DateTime           @default(now())
+  createdByAdmin    User?              @relation("AdminEmployees", fields: [createdByAdminId], references: [id])
+  employees         User[]             @relation("AdminEmployees")
   sessions          Session[]
   alerts            Alert[]
   dailyStats        DailyStat[]
   dailyEmotionStats DailyEmotionStat[]
 
   @@index([role, department])
+  @@index([createdByAdminId, role])
 }
 
 model Session {

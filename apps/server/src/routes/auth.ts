@@ -1,4 +1,3 @@
-import { Role } from "@prisma/client";
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -22,8 +21,6 @@ const registerSchema = z.object({
   name: z.string().min(2).max(100),
   email: z.string().email(),
   password: z.string().min(8).max(100),
-  department: z.string().min(1).max(100).nullable().optional(),
-  role: z.nativeEnum(Role).optional(),
 });
 
 const loginSchema = z.object({

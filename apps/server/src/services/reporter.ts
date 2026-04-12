@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, Role } from "@prisma/client";
 
 import { env } from "../config/env";
 import { prisma } from "../lib/prisma";
@@ -308,15 +308,19 @@ export async function cleanupExpiredEvents(referenceDate = new Date()) {
   };
 }
 
-export async function getDailyStats(userId?: string, days = 7) {
+export async function getDailyStats(adminId: string, userId?: string, days = 7) {
   const start = startOfUtcDay(new Date());
   start.setUTCDate(start.getUTCDate() - Math.max(0, days - 1));
 
   const stats = await prisma.dailyStat.findMany({
     where: {
-      ...(userId ? { userId } : {}),
       date: {
         gte: start,
+      },
+      user: {
+        createdByAdminId: adminId,
+        role: Role.EMPLOYEE,
+        ...(userId ? { id: userId } : {}),
       },
     },
     include: {
@@ -344,13 +348,17 @@ export async function getDailyStats(userId?: string, days = 7) {
   }));
 }
 
-export async function getEmotionTimeline(userId: string, startDate?: Date, endDate?: Date) {
+export async function getEmotionTimeline(adminId: string, userId: string, startDate?: Date, endDate?: Date) {
   const { start, end } = toDateRange(startDate, endDate);
 
   const samples = await prisma.emotionSample.findMany({
     where: {
       session: {
         userId,
+        user: {
+          createdByAdminId: adminId,
+          role: Role.EMPLOYEE,
+        },
       },
       timestamp: {
         gte: start,
@@ -371,13 +379,17 @@ export async function getEmotionTimeline(userId: string, startDate?: Date, endDa
   }));
 }
 
-export async function getBehaviorTimeline(userId: string, startDate?: Date, endDate?: Date) {
+export async function getBehaviorTimeline(adminId: string, userId: string, startDate?: Date, endDate?: Date) {
   const { start, end } = toDateRange(startDate, endDate);
   const [headPoseSamples, behaviorSamples] = await Promise.all([
     prisma.headPoseSample.findMany({
       where: {
         session: {
           userId,
+          user: {
+            createdByAdminId: adminId,
+            role: Role.EMPLOYEE,
+          },
         },
         timestamp: {
           gte: start,
@@ -392,6 +404,10 @@ export async function getBehaviorTimeline(userId: string, startDate?: Date, endD
       where: {
         session: {
           userId,
+          user: {
+            createdByAdminId: adminId,
+            role: Role.EMPLOYEE,
+          },
         },
         timestamp: {
           gte: start,
@@ -476,19 +492,17 @@ export async function getBehaviorTimeline(userId: string, startDate?: Date, endD
   return Array.from(points.values()).sort((left, right) => new Date(left.timestamp).getTime() - new Date(right.timestamp).getTime());
 }
 
-export async function getDailyEmotionStats(filters: { date?: Date; department?: string }) {
+export async function getDailyEmotionStats(adminId: string, filters: { date?: Date; department?: string }) {
   const targetDate = filters.date ? startOfUtcDay(filters.date) : undefined;
 
   const stats = await prisma.dailyEmotionStat.findMany({
     where: {
       ...(targetDate ? { date: targetDate } : {}),
-      ...(filters.department
-        ? {
-            user: {
-              department: filters.department,
-            },
-          }
-        : {}),
+      user: {
+        createdByAdminId: adminId,
+        role: Role.EMPLOYEE,
+        ...(filters.department ? { department: filters.department } : {}),
+      },
     },
     include: {
       user: {
@@ -532,14 +546,18 @@ function escapeCsvValue(value: string | number | null) {
   return stringValue;
 }
 
-export async function exportSessionsCsv(filters: {
+export async function exportSessionsCsv(adminId: string, filters: {
   userId?: string;
   from?: Date;
   to?: Date;
 }) {
   const sessions = await prisma.session.findMany({
     where: {
-      ...(filters.userId ? { userId: filters.userId } : {}),
+      user: {
+        createdByAdminId: adminId,
+        role: Role.EMPLOYEE,
+        ...(filters.userId ? { id: filters.userId } : {}),
+      },
       ...(filters.from || filters.to
         ? {
             startedAt: {
@@ -600,8 +618,8 @@ export async function exportSessionsCsv(filters: {
   return rows.join("\n");
 }
 
-export async function exportEmotionReportCsv(filters: { date?: Date; department?: string }) {
-  const stats = await getDailyEmotionStats(filters);
+export async function exportEmotionReportCsv(adminId: string, filters: { date?: Date; department?: string }) {
+  const stats = await getDailyEmotionStats(adminId, filters);
   const rows = [
     [
       "date",

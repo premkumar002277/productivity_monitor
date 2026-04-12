@@ -96,6 +96,14 @@ export interface AuthResponse {
   tokens: AuthTokens;
 }
 
+export interface ManagedEmployeeAccount {
+  id: string;
+  name: string;
+  email: string;
+  department: string | null;
+  createdAt: string;
+}
+
 export interface SessionSummary {
   id: string;
   startedAt: string;

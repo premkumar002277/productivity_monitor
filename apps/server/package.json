@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "rollup:daily": "npm run build && node -r dotenv/config -e \"require('./dist/services/reporter').runDailyRollup().then((result) => { console.log(result); process.exit(0); }).catch((error) => { console.error(error); process.exit(1); })\"",
     "test": "jest --runInBand"
   },
   "dependencies": {

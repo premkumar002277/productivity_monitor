@@ -1,3 +1,5 @@
+import { ActivityTimeline } from "./ActivityTimeline";
+import { EventCard } from "./EventCard";
 import type { TimelineSession } from "../types/api";
 
 type TimelinePanelProps = {
@@ -15,19 +17,19 @@ export function TimelinePanel({ session, loading = false }: TimelinePanelProps) 
   }
 
   return (
-    <div className="timeline-list">
+    <div className="timeline-stack">
+      <ActivityTimeline events={session.events} sessionStart={session.startedAt} sessionEnd={session.endedAt} />
+
+      <div className="timeline-list">
       {session.events.length === 0 ? <div className="empty-state">No recorded events for this session yet.</div> : null}
 
-      {session.events.map((event) => (
-        <article key={event.id} className="timeline-item">
-          <div>
-            <strong>{event.type.replace(/_/g, " ")}</strong>
-            <p>{new Date(event.timestamp).toLocaleString()}</p>
-          </div>
-
-          {event.value ? <pre>{JSON.stringify(event.value, null, 2)}</pre> : <span className="timeline-item__quiet">No payload</span>}
-        </article>
-      ))}
+        {session.events
+          .slice()
+          .reverse()
+          .map((event) => (
+            <EventCard key={event.id} event={event} />
+          ))}
+      </div>
     </div>
   );
 }

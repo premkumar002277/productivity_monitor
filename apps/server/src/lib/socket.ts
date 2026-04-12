@@ -1,7 +1,5 @@
 import type { Server } from "socket.io";
 
-export const ADMIN_ROOM = "admin-room";
-
 let io: Server | null = null;
 
 export function setSocketServer(server: Server) {
@@ -12,6 +10,18 @@ export function getSocketServer() {
   return io;
 }
 
-export function emitToAdmins(event: string, payload: unknown) {
-  io?.to(ADMIN_ROOM).emit(event, payload);
+export function adminRoom(adminId: string) {
+  return `admin:${adminId}`;
+}
+
+export function userRoom(userId: string) {
+  return `user:${userId}`;
+}
+
+export function emitToAdmin(adminId: string | null | undefined, event: string, payload: unknown) {
+  if (!adminId) {
+    return;
+  }
+
+  io?.to(adminRoom(adminId)).emit(event, payload);
 }

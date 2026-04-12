@@ -10,7 +10,7 @@ import { logger } from "./config/logger";
 import { bootstrapJobs } from "./jobs";
 import { prisma } from "./lib/prisma";
 import { ensureRedisConnection, redis } from "./lib/redis";
-import { ADMIN_ROOM, setSocketServer } from "./lib/socket";
+import { adminRoom, setSocketServer, userRoom } from "./lib/socket";
 import type { AccessTokenPayload } from "./services/jwt";
 import { verifyAccessToken } from "./services/jwt";
 
@@ -43,9 +43,9 @@ async function main() {
     const user = socket.data.user as AccessTokenPayload;
 
     if (user.role === "ADMIN") {
-      socket.join(ADMIN_ROOM);
+      socket.join(adminRoom(user.sub));
     } else {
-      socket.join(`user:${user.sub}`);
+      socket.join(userRoom(user.sub));
     }
 
     socket.emit("socket:ready", {

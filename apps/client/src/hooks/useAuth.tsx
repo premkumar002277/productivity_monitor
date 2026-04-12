@@ -31,8 +31,6 @@ type AuthContextValue = {
     name: string;
     email: string;
     password: string;
-    department?: string | null;
-    role?: AuthUser["role"];
   }) => Promise<AuthUser>;
   logout: () => Promise<void>;
   apiFetch: <T>(path: string, options?: RequestOptions) => Promise<T>;
@@ -203,8 +201,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
       name: string;
       email: string;
       password: string;
-      department?: string | null;
-      role?: AuthUser["role"];
     }) => {
       const response = await apiFetch<AuthResponse>("/api/auth/register", {
         auth: false,

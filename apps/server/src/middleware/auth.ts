@@ -20,6 +20,7 @@ export const requireAuth: RequestHandler = (req, _res, next) => {
       name: payload.name,
       role: payload.role,
       department: payload.department,
+      createdByAdminId: payload.createdByAdminId,
     };
 
     return next();

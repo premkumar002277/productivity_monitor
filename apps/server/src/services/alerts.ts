@@ -1,7 +1,7 @@
 import { env } from "../config/env";
 import { prisma } from "../lib/prisma";
 import { ensureRedisConnection, redis } from "../lib/redis";
-import { emitToAdmins } from "../lib/socket";
+import { emitToAdmin } from "../lib/socket";
 import type { SessionMetrics } from "./scorer";
 
 export type AlertType = "low_score" | "high_stress" | "head_away" | "erratic_behavior" | "low_engagement";
@@ -13,6 +13,7 @@ type AlertSettings = {
 
 type AlertContext = {
   userId: string;
+  adminId: string | null;
   name: string;
   department: string | null;
   sessionId: string;
@@ -39,8 +40,8 @@ function alertRecoveryKey(userId: string, alertType: AlertType) {
   return `alert-recovery:${alertType}:${userId}`;
 }
 
-function emitAlertResolved(alertId: string, userId: string, alertType: AlertType) {
-  emitToAdmins("alert:resolved", {
+function emitAlertResolved(alertId: string, userId: string, alertType: AlertType, adminId: string | null) {
+  emitToAdmin(adminId, "alert:resolved", {
     id: alertId,
     userId,
     alertType,
@@ -65,7 +66,7 @@ async function clearRuleState(userId: string, alertType: AlertType) {
   await redis.del([alertBreachKey(userId, alertType), alertRecoveryKey(userId, alertType)]);
 }
 
-async function resolveOpenAlert(userId: string, alertType: AlertType) {
+async function resolveOpenAlert(userId: string, alertType: AlertType, adminId: string | null) {
   const openAlerts = await prisma.alert.findMany({
     where: {
       userId,
@@ -93,7 +94,7 @@ async function resolveOpenAlert(userId: string, alertType: AlertType) {
   await clearRuleState(userId, alertType);
 
   for (const alert of openAlerts) {
-    emitAlertResolved(alert.id, userId, alertType);
+    emitAlertResolved(alert.id, userId, alertType, adminId);
   }
 }
 
@@ -112,7 +113,7 @@ async function createAlert(context: AlertContext, alertType: AlertType, reason: 
     },
   });
 
-  emitToAdmins("alert:triggered", {
+  emitToAdmin(context.adminId, "alert:triggered", {
     id: alert.id,
     userId: context.userId,
     sessionId: context.sessionId,
@@ -169,7 +170,7 @@ async function evaluateRule(context: AlertContext, evaluation: RuleEvaluation) {
   const recoveryAfterSeconds = evaluation.recoveryAfterSeconds ?? 0;
 
   if (recoveryAfterSeconds === 0) {
-    await resolveOpenAlert(context.userId, evaluation.alertType);
+    await resolveOpenAlert(context.userId, evaluation.alertType, context.adminId);
     return;
   }
 
@@ -185,7 +186,7 @@ async function evaluateRule(context: AlertContext, evaluation: RuleEvaluation) {
   const elapsedMs = Date.now() - Number(recoveryStartedAt);
 
   if (elapsedMs >= recoveryAfterSeconds * 1000) {
-    await resolveOpenAlert(context.userId, evaluation.alertType);
+    await resolveOpenAlert(context.userId, evaluation.alertType, context.adminId);
   }
 }
 
@@ -260,7 +261,7 @@ export async function clearAlertBreach(userId: string) {
   await Promise.all(ALERT_TYPES.map((alertType) => clearRuleState(userId, alertType)));
 }
 
-export async function resolveOpenAlerts(userId: string) {
+export async function resolveOpenAlerts(userId: string, adminId: string | null = null) {
   const openAlerts = await prisma.alert.findMany({
     where: {
       userId,
@@ -286,7 +287,7 @@ export async function resolveOpenAlerts(userId: string) {
   await clearAlertBreach(userId);
 
   for (const alert of openAlerts) {
-    emitAlertResolved(alert.id, userId, alert.alertType as AlertType);
+    emitAlertResolved(alert.id, userId, alert.alertType as AlertType, adminId);
   }
 }
 

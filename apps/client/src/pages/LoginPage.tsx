@@ -2,29 +2,40 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../hooks/useAuth";
-import type { UserRole } from "../types/api";
 
 type Mode = "login" | "register";
 
-export function LoginPage() {
+type LoginPageProps = {
+  initialMode?: Mode;
+};
+
+export function LoginPage({ initialMode = "login" }: LoginPageProps) {
   const navigate = useNavigate();
   const { user, login, register } = useAuth();
-  const [mode, setMode] = useState<Mode>("login");
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: "",
     email: "",
     password: "",
-    department: "",
-    role: "EMPLOYEE" as UserRole,
   });
+
+  useEffect(() => {
+    setMode(initialMode);
+  }, [initialMode]);
 
   useEffect(() => {
     if (user) {
       navigate(user.role === "ADMIN" ? "/admin" : "/employee", { replace: true });
     }
   }, [navigate, user]);
+
+  const handleModeChange = (nextMode: Mode) => {
+    setMode(nextMode);
+    setError(null);
+    navigate(nextMode === "login" ? "/login" : "/register", { replace: true });
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -42,8 +53,6 @@ export function LoginPage() {
               name: form.name,
               email: form.email,
               password: form.password,
-              department: form.department || null,
-              role: form.role,
             });
 
       navigate(authenticatedUser.role === "ADMIN" ? "/admin" : "/employee", { replace: true });
@@ -84,12 +93,26 @@ export function LoginPage() {
 
       <section className="auth-panel">
         <div className="auth-panel__switcher">
-          <button type="button" className={mode === "login" ? "is-active" : ""} onClick={() => setMode("login")}>
+          <button type="button" className={mode === "login" ? "is-active" : ""} onClick={() => handleModeChange("login")}>
             Sign in
           </button>
-          <button type="button" className={mode === "register" ? "is-active" : ""} onClick={() => setMode("register")}>
-            Create account
+          <button
+            type="button"
+            className={mode === "register" ? "is-active" : ""}
+            onClick={() => handleModeChange("register")}
+          >
+            Create admin account
           </button>
+        </div>
+
+        <div className="auth-panel__intro">
+          <span className="eyebrow">{mode === "login" ? "Welcome back" : "Admin setup"}</span>
+          <h2>{mode === "login" ? "Sign in to your workspace" : "Create admin account"}</h2>
+          <p>
+            {mode === "login"
+              ? "Use your admin or employee credentials to continue."
+              : "Public registration is limited to admin accounts. Add employees after signing in from the admin dashboard."}
+          </p>
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>
@@ -103,26 +126,6 @@ export function LoginPage() {
                   placeholder="Aarav Sharma"
                   required
                 />
-              </label>
-
-              <label>
-                Department
-                <input
-                  value={form.department}
-                  onChange={(event) => setForm((current) => ({ ...current, department: event.target.value }))}
-                  placeholder="Product, Sales, Design"
-                />
-              </label>
-
-              <label>
-                Role
-                <select
-                  value={form.role}
-                  onChange={(event) => setForm((current) => ({ ...current, role: event.target.value as UserRole }))}
-                >
-                  <option value="EMPLOYEE">Employee</option>
-                  <option value="ADMIN">Admin</option>
-                </select>
               </label>
             </>
           ) : null}
@@ -152,13 +155,12 @@ export function LoginPage() {
           {error ? <p className="form-error">{error}</p> : null}
 
           <button className="primary-button" type="submit" disabled={submitting}>
-            {submitting ? "Working..." : mode === "login" ? "Enter workspace" : "Create workspace account"}
+            {submitting ? "Working..." : mode === "login" ? "Enter workspace" : "Create admin account"}
           </button>
         </form>
 
         <p className="auth-note">
-          Admin self-registration is enabled in this starter to make local demo/testing easy. Lock that down before a
-          real deployment.
+          Employees no longer self-register here. Team members are created and managed by an admin after sign-in.
         </p>
       </section>
     </div>

@@ -2,8 +2,11 @@ import { useDeferredValue, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { buildQuery } from "../api/http";
+import { AdminHeader } from "../components/AdminHeader";
+import { AdminSummaryCards } from "../components/AdminSummaryCards";
 import { BehaviorChart } from "../components/BehaviorChart";
 import { BehaviorIndicator } from "../components/BehaviorIndicator";
+import { CreateEmployeeModal } from "../components/CreateEmployeeModal";
 import { EmployeeCard } from "../components/EmployeeCard";
 import { EmotionBadge } from "../components/EmotionBadge";
 import { EmotionMeters } from "../components/EmotionMeters";
@@ -20,6 +23,7 @@ import type {
   DashboardData,
   DashboardEmployee,
   EmotionTimelinePoint,
+  ManagedEmployeeAccount,
   TimelineSession,
 } from "../types/api";
 
@@ -37,6 +41,10 @@ export function AdminPage() {
     scoreThreshold: 40,
     durationMinutes: 15,
   });
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [showResetPasswordForm, setShowResetPasswordForm] = useState(false);
+  const [passwordDraft, setPasswordDraft] = useState("");
+  const [accountNotice, setAccountNotice] = useState<string | null>(null);
 
   const deferredSearch = useDeferredValue(search);
   const detailRange = {
@@ -73,6 +81,23 @@ export function AdminPage() {
       setSelectedSessionId(dashboardQuery.data.employees[0].sessionId);
     }
   }, [dashboardQuery.data?.employees, selectedEmployeeId]);
+
+  useEffect(() => {
+    setShowResetPasswordForm(false);
+    setPasswordDraft("");
+  }, [selectedEmployeeId]);
+
+  useEffect(() => {
+    if (!accountNotice) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setAccountNotice(null);
+    }, 4_000);
+
+    return () => window.clearTimeout(timeout);
+  }, [accountNotice]);
 
   const selectedEmployee =
     dashboardQuery.data?.employees.find((employee) => employee.id === selectedEmployeeId) ?? dashboardQuery.data?.employees[0] ?? null;
@@ -140,6 +165,41 @@ export function AdminPage() {
     },
   });
 
+  const resetPasswordMutation = useMutation({
+    mutationFn: (payload: { employeeId: string; newPassword: string }) =>
+      apiFetch<{ employee: { id: string; name: string } }>(`/api/admin/employees/${payload.employeeId}/reset-password`, {
+        method: "PATCH",
+        body: JSON.stringify({ newPassword: payload.newPassword }),
+      }),
+    onSuccess: (response) => {
+      setAccountNotice(`${response.employee.name}'s password was updated.`);
+      setShowResetPasswordForm(false);
+      setPasswordDraft("");
+    },
+  });
+
+  const deleteEmployeeMutation = useMutation({
+    mutationFn: (employeeId: string) =>
+      apiFetch<{ deletedEmployee: { id: string; name: string } }>(`/api/admin/employees/${employeeId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: async (response) => {
+      setAccountNotice(`${response.deletedEmployee.name} was removed from your team.`);
+      setShowResetPasswordForm(false);
+      setPasswordDraft("");
+
+      if (selectedEmployeeId === response.deletedEmployee.id) {
+        setSelectedEmployeeId(null);
+        setSelectedSessionId(null);
+      }
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin-dashboard"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin-alerts"] }),
+      ]);
+    },
+  });
+
   const downloadCsv = (content: string, filename: string) => {
     const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -161,28 +221,44 @@ export function AdminPage() {
   };
 
   const departmentOptions = dashboardQuery.data?.departmentAverages.map((item) => item.department) ?? [];
+  const summary = dashboardQuery.data?.teamSummary ?? {
+    activeEmployees: 0,
+    avgStress: 0,
+    avgEngagement: 0,
+    openAlerts: 0,
+  };
+
+  const handleEmployeeCreated = async (employee: ManagedEmployeeAccount) => {
+    setAccountNotice(`${employee.name} was added to your team.`);
+    setIsCreateModalOpen(false);
+    setSelectedEmployeeId(employee.id);
+    setSelectedSessionId(null);
+    await queryClient.invalidateQueries({ queryKey: ["admin-dashboard"] });
+  };
+
+  const handleDeleteSelectedEmployee = () => {
+    if (!selectedEmployee) {
+      return;
+    }
+
+    if (!window.confirm(`Delete ${selectedEmployee.name}'s account? This removes their sessions and reports too.`)) {
+      return;
+    }
+
+    deleteEmployeeMutation.mutate(selectedEmployee.id);
+  };
 
   return (
     <div className="page-shell">
-      <header className="topbar">
-        <div>
-          <span className="eyebrow">Admin Dashboard</span>
-          <h1>Live productivity and wellbeing command center</h1>
-          <p>{user?.email}</p>
-        </div>
+      <AdminHeader
+        user={user}
+        onAddEmployee={() => setIsCreateModalOpen(true)}
+        onExportSessions={handleExportSessions}
+        onExportEmotions={handleExportEmotions}
+        onLogout={logout}
+      />
 
-        <div className="topbar__actions">
-          <button type="button" className="ghost-button" onClick={() => void handleExportSessions()}>
-            Export sessions CSV
-          </button>
-          <button type="button" className="ghost-button" onClick={() => void handleExportEmotions()}>
-            Export emotions CSV
-          </button>
-          <button type="button" className="ghost-button" onClick={() => void logout()}>
-            Sign out
-          </button>
-        </div>
-      </header>
+      {accountNotice ? <div className="inline-notice inline-notice--success">{accountNotice}</div> : null}
 
       <section className="panel panel--hero">
         <div className="panel__header">
@@ -192,24 +268,7 @@ export function AdminPage() {
           </div>
         </div>
 
-        <div className="team-summary-grid">
-          <article className="metric-card">
-            <span>Active employees</span>
-            <strong>{dashboardQuery.data?.teamSummary.activeEmployees ?? 0}</strong>
-          </article>
-          <article className="metric-card">
-            <span>Team avg stress</span>
-            <strong>{dashboardQuery.data?.teamSummary.avgStress ?? 0}%</strong>
-          </article>
-          <article className="metric-card">
-            <span>Team avg engagement</span>
-            <strong>{dashboardQuery.data?.teamSummary.avgEngagement ?? 0}%</strong>
-          </article>
-          <article className="metric-card">
-            <span>Open alerts</span>
-            <strong>{dashboardQuery.data?.teamSummary.openAlerts ?? 0}</strong>
-          </article>
-        </div>
+        <AdminSummaryCards summary={summary} />
 
         <div className="filter-row">
           <label>
@@ -236,12 +295,14 @@ export function AdminPage() {
 
         <div className="department-grid">
           {dashboardQuery.data?.departmentAverages.map((item) => (
-            <article key={item.department} className="metric-card metric-card--department">
-              <span>{item.department}</span>
-              <strong>{item.averageScore}</strong>
-              <small>
+            <article key={item.department} className="department-card">
+              <div className="department-card__header">
+                <span className="department-card__name">{item.department}</span>
+                <span className="department-card__score">Avg score {item.averageScore}</span>
+              </div>
+              <span className="department-card__meta">
                 {item.activeEmployees}/{item.employeeCount} active now
-              </small>
+              </span>
             </article>
           ))}
         </div>
@@ -257,7 +318,13 @@ export function AdminPage() {
           </div>
 
           <div className="employee-list">
-            {dashboardQuery.data?.employees.length ? null : <div className="empty-state">No employee records match the current filters.</div>}
+            {dashboardQuery.data?.employees.length ? null : (
+              <div className="empty-state">
+                {department || deferredSearch
+                  ? "No employee records match the current filters."
+                  : "No employees yet. Use Add employee to create the first managed account."}
+              </div>
+            )}
             {dashboardQuery.data?.employees.map((employee) => (
               <EmployeeCard
                 key={employee.id}
@@ -286,6 +353,77 @@ export function AdminPage() {
                 <EmotionBadge emotion={selectedEmployee.emotion} />
                 <EmotionMeters emotion={selectedEmployee.emotion} />
                 <BehaviorIndicator behavior={selectedEmployee.behavior} />
+              </div>
+
+              <div className="account-actions-card">
+                <div>
+                  <span className="eyebrow">Account access</span>
+                  <h3>Manage {selectedEmployee.name}'s login</h3>
+                  <p>{selectedEmployee.email}</p>
+                </div>
+
+                <div className="button-row">
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick={() => setShowResetPasswordForm((current) => !current)}
+                  >
+                    {showResetPasswordForm ? "Cancel reset" : "Reset password"}
+                  </button>
+                  <button
+                    type="button"
+                    className="danger-button"
+                    onClick={handleDeleteSelectedEmployee}
+                    disabled={deleteEmployeeMutation.isPending}
+                  >
+                    {deleteEmployeeMutation.isPending ? "Deleting..." : "Delete employee"}
+                  </button>
+                </div>
+
+                {showResetPasswordForm ? (
+                  <form
+                    className="inline-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      resetPasswordMutation.mutate({
+                        employeeId: selectedEmployee.id,
+                        newPassword: passwordDraft,
+                      });
+                    }}
+                  >
+                    <label>
+                      New password
+                      <input
+                        type="password"
+                        value={passwordDraft}
+                        onChange={(event) => setPasswordDraft(event.target.value)}
+                        placeholder="Minimum 8 characters"
+                        minLength={8}
+                        required
+                      />
+                    </label>
+
+                    <div className="button-row">
+                      <button
+                        type="submit"
+                        className="primary-button"
+                        disabled={resetPasswordMutation.isPending || passwordDraft.length < 8}
+                      >
+                        {resetPasswordMutation.isPending ? "Saving..." : "Save new password"}
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => {
+                          setShowResetPasswordForm(false);
+                          setPasswordDraft("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
               </div>
 
               <div className="tab-row">
@@ -475,6 +613,10 @@ export function AdminPage() {
           </div>
         </section>
       </div>
+
+      {isCreateModalOpen ? (
+        <CreateEmployeeModal onClose={() => setIsCreateModalOpen(false)} onCreated={handleEmployeeCreated} />
+      ) : null}
     </div>
   );
 }

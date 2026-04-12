@@ -2,7 +2,7 @@ import { EventType, Prisma } from "@prisma/client";
 
 import { prisma } from "../lib/prisma";
 import { AppError } from "../lib/http";
-import { emitToAdmins } from "../lib/socket";
+import { emitToAdmin } from "../lib/socket";
 import { clearAlertBreach, evaluateAlert, resolveOpenAlerts } from "./alerts";
 import {
   normalizeHeadPoseValue,
@@ -31,6 +31,10 @@ type BehaviorBucket = {
 
 function toDecimal(value: number, fractionDigits = 3) {
   return new Prisma.Decimal(value.toFixed(fractionDigits));
+}
+
+function getAdminOwnerId(user: AuthenticatedUser) {
+  return user.role === "ADMIN" ? user.id : user.createdByAdminId;
 }
 
 function toLivePayload(user: AuthenticatedUser, sessionId: string, metrics: ReturnType<typeof computeSessionMetrics>) {
@@ -192,6 +196,11 @@ export async function getSessionForUser(sessionId: string, user: AuthenticatedUs
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
     include: {
+      user: {
+        select: {
+          createdByAdminId: true,
+        },
+      },
       events: {
         orderBy: {
           timestamp: "asc",
@@ -204,7 +213,11 @@ export async function getSessionForUser(sessionId: string, user: AuthenticatedUs
     throw new AppError(404, "Session not found");
   }
 
-  if (user.role !== "ADMIN" && session.userId !== user.id) {
+  if (user.role === "ADMIN") {
+    if (session.userId !== user.id && session.user.createdByAdminId !== user.id) {
+      throw new AppError(403, "You cannot access this session");
+    }
+  } else if (session.userId !== user.id) {
     throw new AppError(403, "You cannot access this session");
   }
 
@@ -295,19 +308,21 @@ export async function persistEventBatch(user: AuthenticatedUser, sessionId: stri
 
   const livePayload = toLivePayload(user, sessionId, metrics);
   await writeLiveScore(livePayload);
+  const adminId = getAdminOwnerId(user);
 
   await evaluateAlert({
     userId: user.id,
+    adminId,
     name: user.name,
     department: user.department,
     sessionId,
     metrics,
   });
 
-  emitToAdmins("score:update", livePayload);
+  emitToAdmin(adminId, "score:update", livePayload);
 
   if (metrics.emotion.updatedAt) {
-    emitToAdmins("emotion:update", {
+    emitToAdmin(adminId, "emotion:update", {
       userId: user.id,
       sessionId,
       dominant: metrics.emotion.dominant,
@@ -320,7 +335,7 @@ export async function persistEventBatch(user: AuthenticatedUser, sessionId: stri
   }
 
   if (headPoseRows.length > 0) {
-    emitToAdmins("headpose:update", {
+    emitToAdmin(adminId, "headpose:update", {
       userId: user.id,
       sessionId,
       lookingAway: metrics.behavior.lookingAway,
@@ -333,7 +348,7 @@ export async function persistEventBatch(user: AuthenticatedUser, sessionId: stri
   }
 
   if (behaviorRows.length > 0) {
-    emitToAdmins("behavior:update", {
+    emitToAdmin(adminId, "behavior:update", {
       userId: user.id,
       sessionId,
       erraticScore: metrics.behavior.erraticScore,
@@ -360,9 +375,11 @@ export async function stopSession(user: AuthenticatedUser, sessionId: string) {
     include: {
       user: {
         select: {
+          id: true,
           name: true,
           email: true,
           department: true,
+          createdByAdminId: true,
         },
       },
     },
@@ -372,7 +389,11 @@ export async function stopSession(user: AuthenticatedUser, sessionId: string) {
     throw new AppError(404, "Session not found");
   }
 
-  if (session.userId !== user.id && user.role !== "ADMIN") {
+  if (user.role === "ADMIN") {
+    if (session.userId !== user.id && session.user.createdByAdminId !== user.id) {
+      throw new AppError(403, "You cannot stop this session");
+    }
+  } else if (session.userId !== user.id) {
     throw new AppError(403, "You cannot stop this session");
   }
 
@@ -413,9 +434,10 @@ export async function stopSession(user: AuthenticatedUser, sessionId: string) {
 
   await deleteLiveScore(updatedSession.userId);
   await clearAlertBreach(updatedSession.userId);
-  await resolveOpenAlerts(updatedSession.userId);
+  const adminId = session.user.createdByAdminId ?? (user.role === "ADMIN" && session.userId === user.id ? user.id : null);
+  await resolveOpenAlerts(updatedSession.userId, adminId);
 
-  emitToAdmins("score:update", {
+  emitToAdmin(adminId, "score:update", {
     userId: updatedSession.userId,
     sessionId: updatedSession.id,
     name: session.user.name,

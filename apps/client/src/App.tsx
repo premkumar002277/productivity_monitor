@@ -9,7 +9,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login" element={<LoginPage initialMode="login" />} />
+      <Route path="/register" element={<LoginPage initialMode="register" />} />
 
       <Route element={<ProtectedRoute allowedRoles={["EMPLOYEE"]} />}>
         <Route path="/employee" element={<EmployeePage />} />

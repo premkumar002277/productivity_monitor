@@ -10,6 +10,7 @@ type BaseTokenPayload = {
   name: string;
   role: Role;
   department: string | null;
+  createdByAdminId: string | null;
 };
 
 export type AccessTokenPayload = BaseTokenPayload & {
@@ -27,6 +28,7 @@ type TokenUser = {
   name: string;
   role: Role;
   department: string | null;
+  createdByAdminId: string | null;
 };
 
 function isAccessTokenPayload(value: unknown): value is AccessTokenPayload {
@@ -66,6 +68,7 @@ export function issueAccessToken(user: TokenUser) {
       name: user.name,
       role: user.role,
       department: user.department,
+      createdByAdminId: user.createdByAdminId,
       type: "access",
     } satisfies AccessTokenPayload,
     env.JWT_ACCESS_SECRET,
@@ -81,6 +84,7 @@ export function issueRefreshToken(user: TokenUser, tokenId: string) {
       name: user.name,
       role: user.role,
       department: user.department,
+      createdByAdminId: user.createdByAdminId,
       type: "refresh",
       jti: tokenId,
     } satisfies RefreshTokenPayload,

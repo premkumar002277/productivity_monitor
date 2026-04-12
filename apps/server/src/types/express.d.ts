@@ -9,6 +9,7 @@ declare global {
         name: string;
         role: Role;
         department: string | null;
+        createdByAdminId: string | null;
       };
     }
   }

@@ -10,6 +10,7 @@
     "dev:client": "npm run dev --workspace @workwatch/client",
     "build": "npm run build --workspace @workwatch/server && npm run build --workspace @workwatch/client",
     "test": "npm run test --workspace @workwatch/server",
+    "rollup:daily": "npm run rollup:daily --workspace @workwatch/server",
     "prisma:generate": "npm run prisma:generate --workspace @workwatch/server",
     "prisma:migrate": "npm run prisma:migrate --workspace @workwatch/server"
   },
