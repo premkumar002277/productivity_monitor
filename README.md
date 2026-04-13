@@ -212,7 +212,7 @@ Every employee must actively check a consent box and click "Start Monitoring" be
 ### Step 1 — Clone the repository
 
 ```bash
-git clone https://github.com/productivity_monitor/workwatch.git
+git clone https://github.com/premkumar002277/productivity_monitor.git
 cd workwatch
 ```
 
